@@ -4,7 +4,7 @@ This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/N
 
 **Current scope:** documentation and fork groundwork only. None of the three changes below is implemented or deployed by this PR. Work proceeds issue by issue, starting with the 24-hour PR cooldown.
 
-**Tracking PR:** pending creation; the published URL will be added before handoff.
+**Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
 ## Baseline and status conventions
 
