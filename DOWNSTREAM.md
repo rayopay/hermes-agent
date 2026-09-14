@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** documentation and fork groundwork only. None of the three changes below is implemented or deployed by this PR. Work proceeds issue by issue, starting with the 24-hour PR cooldown.
+**Current scope:** RP-HERMES-001 implementation and isolated validation: remove the blanket PR-comment cooldown and hold only ambiguous interrupted implementation recovery for owner reconciliation. This behavior is authorized for development, not yet accepted or deployed. CI-policy discovery and triage changes remain queued separately.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -17,6 +17,7 @@ This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/N
 Status meanings:
 
 - **Proposed:** a direction and acceptance criteria, not a finalized API or working feature.
+- **Authorized development:** the behavior is approved and local implementation is active; no implementation PR is open yet.
 - **In implementation:** an implementation PR exists and work is actually active.
 - **In review:** code and verification evidence are submitted, with outstanding review identified.
 - **Merged:** accepted into the fork; not necessarily deployed.
@@ -27,7 +28,7 @@ Status meanings:
 
 1. **RP-HERMES-001 — PR-linked continuation without a blanket 24-hour delay**
    - Priority: first implementation.
-   - Status: **Proposed — implementation not started**.
+   - Status: **Authorized development — conservative interrupted-handoff recovery selected**.
    - Implementation PR: not opened.
    - Merge / deployment: neither performed.
 2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
@@ -53,23 +54,47 @@ Baseline source: [`hermes_cli/kanban_db_dispatch.py`](https://github.com/NousRes
 
 ### Proposed fix
 
-Replace comment age as the sole authority for blocking legitimate continuation with an explicit, audited continuation decision integrated into the native lifecycle. Reuse the existing task and PR identity; distinguish continuation from another attempt to publish the same work. Prefer the smallest correct extension of existing review/dispatch machinery over a parallel scheduler or a general-purpose policy framework.
+Remove the blanket PR-comment timer rather than add a special continuation override. A link in a comment is context, not proof that publication succeeded, that assigned scope is complete, or that eligible Ready work should wait. Preserve comments, the existing card and PR, and native review/claim/retry protections. Do not replace the timer with a shorter delay or an unrestricted force-spawn path.
 
-The implementation design must settle how publication identity and continuation authorization are represented, who may request continuation, how that authorization is consumed or invalidated, and how older cards are treated. No configuration key, command name, or database field is promised by this document.
+First exercise the existing lifecycle protections against competing claims, review-requested changes, deliberate reopening, publication followed by worker exit before handoff, and repeated failures. If removing the timer exposes a real recovery or handoff gap, address that specific gap through existing lifecycle machinery. Do not add a new permission system, scheduler, or manual recovery requirement without demonstrating that it is necessary. No new configuration key, command, or database field is assumed.
 
-Do not merely set the timeout to zero, discard PR comments, relabel implementation as review, or add an unrestricted force-spawn path. A shorter configurable delay alone does not resolve the lifecycle mismatch.
+Explain the reason for each code change in comments, including which invariant owns the remaining protection. A claim lock prevents competing current claimants; it does not by itself establish exactly-once external publication. Do not describe the removal as publication-safe until the interrupted-handoff scenario is verified.
 
 ### Acceptance criteria
 
-- An authorized changes-requested or unfinished-finalization continuation can become eligible without waiting 24 hours, while reusing its existing task/PR.
-- Without valid continuation authorization, duplicate-publication prevention remains effective; adding prose cannot grant authorization or prolong an authorized continuation's delay.
-- An existing worker, claim, dependency hold, or runtime/workspace owner cannot be displaced by the continuation path. Concurrent attempts cannot create duplicate workers.
-- Authorization is scoped to the task and relevant lifecycle/PR identity, audited, and cannot be replayed after ownership or relevant work identity changes.
-- Review-lane behavior, authentication/rate-limit guards, and unrelated recent-success safeguards remain intact.
-- Older cards retain their historical evidence and safe behavior; migration and fallback decisions are explicit.
-- Real native-path regression tests cover authorized continuation, unauthorized repetition, stale authorization, and competing dispatch attempts. User-facing diagnostics distinguish eligibility, a hold, and a verified running worker.
+- Eligible Ready and Review work can proceed despite a fresh or repeated PR URL comment, without a PR-link-based wait or a special override.
+- Changes-requested continuation and deliberate reopening preserve the same card/PR and historical evidence; neither a URL nor worker exit implies completion or reviewer readiness.
+- Competing dispatch attempts cannot create multiple current DB claimants or duplicate live workers in the exercised native path. Preserve existing worker, claim and dependency exclusions; identify any pre-existing process-tree/runtime limitations separately.
+- Publication followed by worker exit before native handoff has an explicit, tested recovery behavior. Show what prevents sequential duplicate publication, or clearly report that safety criterion as unmet rather than presenting retry budgets or advisory context as idempotency.
+- Review-lane behavior, authentication/rate-limit guards, unrelated recent-success safeguards, and bounded failure accounting remain intact.
+- Older cards retain historical evidence; any migration, fallback, or additional recovery requirement is explicit.
+- Real native-path regression tests cover competing claims, requested changes, reopening, clean/nonzero interrupted handoff, and repeated failure. Distinguish injected spawn/provider boundaries from actual worker execution and GitHub lifecycle proof. User-facing diagnostics distinguish eligibility, a hold, and a verified running worker.
 
-**Non-goals:** changing triage recurrence, weakening completion/CI checks, creating replacement cards or sibling PRs, or deploying a runtime change in this documentation PR.
+### Pre-implementation safety experiment
+
+Fork base: `d77d61287012a53fe915c11e950bbcc72a0a7630`. The preserved pre-implementation characterization experiment exercised real disposable SQLite state and native reclaim-through-dispatch, replacing only the `active_pr` guard result in its experimental arm. Spawn and publication were inert test boundaries, not real worker/GitHub execution. Its source SHA-256 is `b79ba8a87567393b859801b77317c3b4d62d1d2211ae4f865909951e81efd43a`; these historical results must not be presented as candidate-fix test results.
+
+Two identical-source runs each passed all 14 cases. Both clean and nonzero worker exits after synthetic PR-comment evidence allowed a second committed run in the same dispatch tick when the timer was removed. The timer-intact arms deferred those tasks. Normal no-publication retries, same-card review and changes-requested handoff, competing direct-claim refusal, stale-run handoff refusal, and exhausted retry budgets behaved as asserted. These are characterization results, not proof that duplicate publication is prevented; real concurrent worker/process-tree behavior and GitHub publication were not exercised.
+
+**Approved recovery behavior:** remove the normal PR-link delay. When an implementation run is interrupted before handoff and there is evidence of possible publication, use a durable native hold so the owning agent can reconcile the existing work before resuming. This is an uncertainty check, not proof that a PR was published. Ordinary continuation, requested changes and deliberate reopening do not acquire a new wait merely because a PR link exists. Reuse existing lifecycle resolution rather than introduce a new scheduler or permission system. A hold can remain unresolved until the owner acts; there is no automatic 24-hour release.
+
+### Implemented candidate and verification
+
+- Claims record a task-comment row-ID cursor in their existing event payload. Only a newly recorded possible PR reference makes an interrupted implementation uncertain; a reference is not proof of publication or authorship.
+- Successful interrupted-run closure installs a sticky native `blocked` event in the same transaction. Coverage includes clean/nonzero exit, timeout, stale/TTL/manual/orphan reclaim, and claim-time dangling-run recovery. Manual reclaim pins the selected status/run/PID/lock so a stale NULL-lock writer cannot erase another recovery hold.
+- The owner inspects the failed run and referenced comment, reconciles existing work, and uses native unblock or the appropriate existing lifecycle disposition. This is not an automatic owner agent launch: notification/wake depends on existing subscriptions and delivery settings. New claims start a new evidence cursor, so an old reference does not retrigger the hold.
+- Human notifications, owner wake text and dashboard events reflect the actual held state. They do not promise automatic retry while the recovery hold remains active.
+- No new schema table/column, config setting, scheduler, permission system, or GitHub request is introduced. Review-source retries and rate-limit exits retain their existing policy; auth, dependency, recent-success and retry-budget protections remain in place.
+
+**Focused verification:** canonical `scripts/run_tests.sh`, credential-free scratch HOME, core/dev/messaging dependencies from unchanged `uv.lock`: all 94 Kanban-named test files completed with **660 passed, 0 failed, 2 skipped**. Tests use real native SQLite, claim/reclaim/lifecycle transactions and notification formatting; worker spawn, provider publication and signals are inert boundaries. Independent review found two recovery bypasses and contradictory diagnostics; these were fixed with causal red/green regressions, and the subsequent scoped review found no remaining change-caused P1/P2 blocker. New Python files pass Ruff F checks; `git diff --check` passes.
+
+**Full-suite limitation:** a separate full-repository attempt was stopped at its 1,800-second bound (exit 124), with source hashes unchanged and no final full-suite verdict. It had recorded 27 test failures plus collection errors. Replaying all 29 failing/error files on the unchanged base in the same dependency environment reproduced 26 identical failing test IDs and the 11 collection-error files. Missing optional ACP/Anthropic dependencies explain several failures; do not classify every failure as dependency-only. The remaining gateway MCP test passed on both baseline and candidate reruns; its original intermittent failure is retained. This is not a full-suite pass or release qualification.
+
+**Migration and rollback:** new claim-event metadata is additive. Existing in-flight runs without a cursor use an inclusive start-time fallback, which can conservatively hold a same-second pre-existing reference. Old history is never deleted or bulk rewritten. A prior runtime ignores the new cursor and understands the existing blocked/unblocked events, but restores the old PR-comment timer. Before any rollout or rollback, drain workers, preserve exact code/dependencies and board backups, rehearse on isolated board copies, and verify held-card state; no deployment or rollback drill has occurred in this change.
+
+**Outstanding acceptance:** CodeRabbit/PR review, full-suite qualification, actual isolated worker/GitHub lifecycle proof and approved rollout/rollback remain outstanding. Unrecorded external publication cannot be discovered from comments alone; this is not an exactly-once publication guarantee. Pre-existing process-tree, missing/corrupt-run and postcommit bookkeeping limitations are not certified by these tests. Live boards, CI acceptance and triage policies remain outside the change, and deployment requires separate approval.
+
+**Non-goals:** changing triage recurrence, weakening completion/CI checks, creating replacement cards or sibling PRs, or deploying a runtime change during this validation phase.
 
 ## RP-HERMES-003: CI acceptance and policy discovery
 

@@ -235,7 +235,21 @@ class _Collector:
         task = self.kb.get_task(conn, sub["task_id"])
         logger.debug("kanban notifier: claimed %d event(s) for %s on board %s cursor %s→%s",
                      len(events), sub["task_id"], slug, old_cursor, cursor)
-        return {"sub": sub, "old_cursor": old_cursor, "cursor": cursor, "events": events, "task": task, "board": slug}
+        # The blocked event precedes crash/timeout bookkeeping and may have been
+        # delivered on a previous poll. Read current hold provenance, not just the
+        # claimed batch, and let a later native unblock/ordinary block supersede it.
+        recovery_hold = None
+        if task and task.status == "blocked":
+            row = conn.execute(
+                "SELECT kind, run_id, payload FROM task_events WHERE task_id = ? "
+                "AND kind IN ('blocked', 'unblocked') ORDER BY id DESC LIMIT 1",
+                (sub["task_id"],)).fetchone()
+            if row and row["kind"] == "blocked":
+                payload = self.kb._json_dict(row["payload"])
+                if payload.get("reason_code") == "interrupted_implementation":
+                    recovery_hold = {**payload, "run_id": row["run_id"]}
+        return {"sub": sub, "old_cursor": old_cursor, "cursor": cursor, "events": events,
+                "task": task, "board": slug, "recovery_hold": recovery_hold}
 
     def collect_board(self, slug: str) -> None:
         """Claim events on one board, appending delivery dicts to ``deliveries``."""
@@ -403,6 +417,16 @@ class _KanbanNotification:
         # Worker handoff carried into the synthetic wake turn so the woken
         # creator doesn't re-decompose work already on the board.
         self.wake_handoff = self.wake_review_detail = self.session_key = self.synth = ""
+        self.recovery_detail = ""
+        hold = d.get("recovery_hold")
+        if hold and task and task.status == "blocked":
+            # Keep identifiers outside the bounded reason so clipping cannot hide
+            # the evidence the owner needs. Reuse external-delivery sanitization.
+            self.recovery_detail = (
+                f"Current recovery hold: run_id={_safe_review_reason(hold.get('run_id'), 48)}; "
+                f"comment_id={_safe_review_reason(hold.get('comment_id'), 48)}. "
+                + _safe_review_reason(hold.get("reason"), 320)
+            )
         self.plat: Any = None
         self.adapter: Any = None
         self.is_push_adapter = True
@@ -447,6 +471,13 @@ class _KanbanNotification:
         formatter = _EVENT_FORMATTERS.get(ev.kind)
         if formatter is None:
             return None
+        if self.recovery_detail:
+            # A later crash or stale review event must not promise a retry or
+            # overwrite the actionable hold. Distinguish its historical run
+            # from the current hold's run when multiple attempts were queued.
+            event_run = _safe_review_reason(getattr(ev, "run_id", None), 48)
+            return (f"⏸ {self.head} currently blocked "
+                    f"(event: {ev.kind}, event run: {event_run})\n{self.recovery_detail}")
         msg, handoff, review_detail = formatter(ev, self)
         if handoff is not None:
             self.wake_handoff = handoff
@@ -470,6 +501,8 @@ class _KanbanNotification:
         # i18n keys: gateway.kanban.wake.<kind> for each _WAKE_KINDS entry.
         _parts = [t(f"gateway.kanban.wake.{k}") for k in _WAKE_KINDS if k in self.wake_kinds]
         _status = t("gateway.kanban.wake.status_joiner").join(_parts) or t("gateway.kanban.wake.status_default")
+        if self.recovery_detail:
+            _status = t("gateway.kanban.wake.blocked")
         synth = t(
             "gateway.kanban.wake.message",
             task_id=sub["task_id"], status=_status, title=self.title,
@@ -481,6 +514,8 @@ class _KanbanNotification:
             synth += "\n" + t("gateway.kanban.wake.handoff", summary=self.wake_handoff)
         if self.wake_review_detail:
             synth += "\n" + t("gateway.kanban.wake.review_detail", reason=self.wake_review_detail)
+        if self.recovery_detail:
+            synth += "\n" + self.recovery_detail
         self.synth = synth + "\n\n" + t("gateway.kanban.wake.guidance")
 
     def _log_woke(self) -> None:

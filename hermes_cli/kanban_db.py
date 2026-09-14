@@ -1869,7 +1869,7 @@ def _end_run(
     run_id = _current_run_id(conn, task_id)
     if run_id is None:
         return None
-    conn.execute(
+    closed = conn.execute(
         """
         UPDATE task_runs
            SET status        = ?,
@@ -1886,6 +1886,12 @@ def _end_run(
         """,
         (status or outcome, outcome, summary, error, _json_or_null(metadata), now, run_id),
     )
+    if closed.rowcount == 1:
+        # Retry recovery callers reach here AFTER their ownership CAS.
+        # Hold in this same transaction so no dispatcher can claim a
+        # transient Ready gap; stale/ended runs must never introduce a hold.
+        from hermes_cli.kanban_db_recovery import hold_interrupted_implementation
+        hold_interrupted_implementation(conn, task_id, run_id, outcome)
     conn.execute("UPDATE tasks SET current_run_id = NULL WHERE id = ?", (task_id,))
     return run_id
 
@@ -2127,9 +2133,16 @@ def _claim_and_open_run(
     )
     run_id = run_cur.lastrowid
     conn.execute("UPDATE tasks SET current_run_id = ? WHERE id = ?", (run_id, task_id))
+    # A transaction-local row-id cursor distinguishes pre-existing references
+    # from comments recorded during this attempt, even within the same second.
+    # It is an evidence boundary, NOT proof that this worker published a PR.
+    comment_cursor = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM task_comments WHERE task_id = ?", (task_id,),
+    ).fetchone()[0]
     _append_event(
         conn, task_id, "claimed",
-        {"lock": lock, "expires": expires, "run_id": run_id, **(event_extra or {})}, run_id=run_id,
+        {"lock": lock, "expires": expires, "run_id": run_id,
+         **(event_extra or {}), "comment_cursor": comment_cursor}, run_id=run_id,
     )
     return run_id
 
@@ -2158,9 +2171,21 @@ def claim_task(
             _append_event(conn, task_id, "claim_rejected", {"reason": "parents_not_done"})
             return None
         # Close a leaked prior run so the CAS below doesn't strand it.
-        _reclaim_dangling_run(
+        dangling_run_id = _reclaim_dangling_run(
             conn, task_id, statuses=("ready",), now=now, note="invariant recovery on re-claim",
         )
+        if dangling_run_id is not None:
+            # Automatic recovery must fence uncertain publication before the
+            # successor CAS, in this same transaction. Explicit unblock/reopen
+            # callers below are owner dispositions, not automatic retries.
+            from hermes_cli.kanban_db_recovery import hold_interrupted_implementation
+
+            hold_interrupted_implementation(conn, task_id, dangling_run_id, "reclaimed")
+            conn.execute(
+                "UPDATE tasks SET current_run_id = NULL WHERE id = ? AND current_run_id = ? "
+                "AND status = 'blocked' AND claim_lock IS NULL",
+                (task_id, dangling_run_id),
+            )
         run_id = _claim_and_open_run(conn, task_id, "ready", lock, expires, now)
         if run_id is None:
             return None
@@ -2416,7 +2441,7 @@ def reclaim_task(
     """Operator reclaim regardless of TTL: release the claim, restore the source
     phase, reset the failure counter. False when not running."""
     row = conn.execute(
-        "SELECT status, claim_lock, worker_pid FROM tasks WHERE id = ?", (task_id,),
+        "SELECT status, claim_lock, worker_pid, current_run_id FROM tasks WHERE id = ?", (task_id,),
     ).fetchone()
     if not row:
         return False
@@ -2427,11 +2452,17 @@ def reclaim_task(
     termination = _terminate_reclaimed_worker(row["worker_pid"], prev_lock, signal_fn=signal_fn)
     with write_txn(conn):
         retry_status = _retry_status_for_run(conn, task_id)
+        # A NULL lock is not an ownership identity: orphan recovery can close
+        # this run and commit a hold while termination is outside the txn.
+        # Pin the selected lifecycle/run/PID as well, or a stale reclaim can
+        # erase that hold (or operate on a successor) without owning its run.
         cur = conn.execute(
             "UPDATE tasks SET status = ?, claim_lock = NULL, "
             "claim_expires = NULL, worker_pid = NULL "
             "WHERE id = ? AND status IN ('running', 'ready', 'blocked') "
-            "AND claim_lock IS ?", (retry_status, task_id, prev_lock),
+            "AND status = ? AND current_run_id IS ? AND worker_pid IS ? "
+            "AND claim_lock IS ?",
+            (retry_status, task_id, row["status"], row["current_run_id"], row["worker_pid"], prev_lock),
         )
         if cur.rowcount != 1:
             return False
@@ -3278,16 +3309,20 @@ def promote_task(
 
 def _reclaim_dangling_run(
     conn: sqlite3.Connection, task_id: str, *, statuses, now: int, note: str,
-) -> None:
+) -> Optional[int]:
     """Close a leaked open run before a status flip so the invariant
-    ``current_run_id IS NULL <=> run row terminal`` holds; no-op normally."""
+    ``current_run_id IS NULL <=> run row terminal`` holds; return only a run
+    closed here so automatic claim recovery can compose its hold atomically.
+    Keep existing summary/error/metadata rather than replacing them with a
+    generic recovery report. Explicit owner dispositions need no new hold.
+    """
     placeholders = ", ".join("?" for _ in statuses)
     stale = conn.execute(
         f"SELECT current_run_id FROM tasks WHERE id = ? AND status IN ({placeholders})",
         (task_id, *statuses),
     ).fetchone()
     if stale and stale["current_run_id"]:
-        conn.execute(
+        closed = conn.execute(
             """
             UPDATE task_runs
                SET status = 'reclaimed', outcome = 'reclaimed',
@@ -3298,6 +3333,9 @@ def _reclaim_dangling_run(
             """,
             (note, now, int(stale["current_run_id"])),
         )
+        if closed.rowcount == 1:
+            return int(stale["current_run_id"])
+    return None
 
 
 def _landing_status_after_parents(conn: sqlite3.Connection, task_id: str) -> str:

@@ -417,16 +417,13 @@ def test_review_dispatch_gate_prevents_phantom_reviewer(
         assert tid in [s[0] for s in res_on.spawned]
 
 
-def test_active_pr_guard_skipped_for_review_lane_but_defers_ready_lane(
+def test_pr_reference_allows_ready_and_review_but_quota_still_defers(
     kanban_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """B2 regression: a fresh PR-URL comment must not block reviewer spawns.
+    """Native handoff, not a PR reference, selects the review lane.
 
-    A task parked in ``review`` with a PR link younger than 24h is the
-    CANONICAL review handoff (worker opened a PR then requested review) —
-    the review-lane dispatch must still claim/spawn it. The same comment on
-    a ready-lane task is a duplicate-work signal and stays deferred.
-    Rate-limit cooldown still applies in the review lane.
+    Neither ordinary lane waits on comment age. Ambiguous interrupted-run
+    recovery is tested separately; rate-limit cooldown still applies here.
     """
     import hermes_cli.config as cfgmod
     import hermes_cli.profiles as profmod
@@ -452,15 +449,15 @@ def test_active_pr_guard_skipped_for_review_lane_but_defers_ready_lane(
         ready_id = kb.create_task(conn, title="already PRed", assignee="worker")
         kb.add_comment(conn, ready_id, author="worker", body=pr_comment)
 
-        assert kbd.check_respawn_guard(conn, ready_id) == "active_pr"
+        assert kbd.check_respawn_guard(conn, ready_id) is None
         assert kbd.check_respawn_guard(conn, review_id, lane="review") is None
 
         res = kbd.dispatch_once(conn, dry_run=True)
         spawned_ids = [s[0] for s in res.spawned]
         guarded = dict(res.respawn_guarded)
         assert review_id in spawned_ids
-        assert ready_id not in spawned_ids
-        assert guarded.get(ready_id) == "active_pr"
+        assert ready_id in spawned_ids
+        assert ready_id not in guarded
 
         # Rate-limit cooldown still defers the review lane.
         _now = int(__import__("time").time())

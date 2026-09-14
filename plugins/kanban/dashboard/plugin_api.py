@@ -723,6 +723,11 @@ def _set_status_direct(conn: sqlite3.Connection, task_id: str, new_status: str) 
                 conn, task_id, outcome="reclaimed", status="reclaimed",
                 summary=f"status changed to {effective_status} (dashboard/direct)")
             terminations.append((prev["worker_pid"], prev["claim_lock"]))
+        # Closing an interrupted run can install an owner-reconciliation hold.
+        # Publish and recompute from the final row, not the requested move, while
+        # still under this transaction so the event cannot advertise a false Ready.
+        effective_status = conn.execute(
+            "SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()["status"]
         conn.execute(
             "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) VALUES (?, ?, 'status', ?, ?)",
             (task_id, run_id, json.dumps({"status": effective_status, "requested_status": new_status}), int(time.time())))
