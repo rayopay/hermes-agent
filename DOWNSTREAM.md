@@ -30,13 +30,13 @@ Status meanings:
    - Status: **Proposed — implementation not started**.
    - Implementation PR: not opened.
    - Merge / deployment: neither performed.
-2. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
+2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
    - Priority: queued after RP-HERMES-001.
    - Status: **Proposed — implementation not started**.
    - Implementation PR: not opened.
    - Merge / deployment: neither performed.
-3. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
-   - Priority: queued after RP-HERMES-002.
+3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
+   - Priority: queued after RP-HERMES-003.
    - Status: **Proposed — implementation not started**.
    - Implementation PR: not opened.
    - Merge / deployment: neither performed.
@@ -71,31 +71,6 @@ Do not merely set the timeout to zero, discard PR comments, relabel implementati
 
 **Non-goals:** changing triage recurrence, weakening completion/CI checks, creating replacement cards or sibling PRs, or deploying a runtime change in this documentation PR.
 
-## RP-HERMES-002: Block recurrence and triage recovery
-
-### Observed behavior and motivation
-
-The baseline `_route_block` increments recurrence when the incoming block **category** equals the previous category. It does not compare the reason or identify the actual unresolved blocker. At `BLOCK_RECURRENCE_LIMIT = 2`, the task enters triage. Unblocking and status-only triage resumption preserve the counter.
-
-Consequently, two different capability problems can be counted as the same loop, and a manually resumed task can immediately return to triage. The real infinite-retry safeguard is valuable; category-level false positives and unclear recovery are the problem.
-
-Baseline source: [`hermes_cli/kanban_db.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_db.py), `_route_block`, `unblock_task`, and `specify_triage_task`.
-
-### Proposed fix
-
-Distinguish the same unresolved blocker from a new one, and provide an explicit, audited recovery operation when a blocker has genuinely been resolved. Define blocker identity and authorization before selecting a schema. Simple free-text equality is insufficient: superficial rewording must not defeat the breaker.
-
-### Acceptance criteria
-
-- Distinct blockers in the same category do not automatically count as the same recurrence.
-- Repeated unresolved blockers still trigger bounded escalation, including equivalent or reworded reports.
-- Authorized recovery can start a new recovery cycle without deleting previous events, failure evidence, or accepted work.
-- Status dragging alone does not silently erase protections or replay completed execution.
-- Dependency waiting, dispatcher failure counts, review routing, and active ownership retain their separate meanings.
-- Legacy counters and ambiguous blocker identities have an explicit safe migration policy; no blanket board reset is performed.
-
-**Non-goals:** disabling circuit breakers, changing `kanban.failure_limit` as a substitute, or automatically redispatching all triage cards.
-
 ## RP-HERMES-003: CI acceptance and policy discovery
 
 ### Observed behavior and motivation
@@ -122,6 +97,31 @@ This operator policy is an explicit alternative authority, **not** a claim that 
 - Unreadable policy, malformed configuration, and API failures reject completion with actionable diagnostics. Existing PR contracts are preserved, not changed to local-only.
 
 **Non-goals:** changing GitHub billing or visibility, treating empty policy as acceptance, or disabling required CI checks.
+
+## RP-HERMES-002: Block recurrence and triage recovery
+
+### Observed behavior and motivation
+
+The baseline `_route_block` increments recurrence when the incoming block **category** equals the previous category. It does not compare the reason or identify the actual unresolved blocker. At `BLOCK_RECURRENCE_LIMIT = 2`, the task enters triage. Unblocking and status-only triage resumption preserve the counter.
+
+Consequently, two different capability problems can be counted as the same loop, and a manually resumed task can immediately return to triage. The real infinite-retry safeguard is valuable; category-level false positives and unclear recovery are the problem.
+
+Baseline source: [`hermes_cli/kanban_db.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_db.py), `_route_block`, `unblock_task`, and `specify_triage_task`.
+
+### Proposed fix
+
+Distinguish the same unresolved blocker from a new one, and provide an explicit, audited recovery operation when a blocker has genuinely been resolved. Define blocker identity and authorization before selecting a schema. Simple free-text equality is insufficient: superficial rewording must not defeat the breaker.
+
+### Acceptance criteria
+
+- Distinct blockers in the same category do not automatically count as the same recurrence.
+- Repeated unresolved blockers still trigger bounded escalation, including equivalent or reworded reports.
+- Authorized recovery can start a new recovery cycle without deleting previous events, failure evidence, or accepted work.
+- Status dragging alone does not silently erase protections or replay completed execution.
+- Dependency waiting, dispatcher failure counts, review routing, and active ownership retain their separate meanings.
+- Legacy counters and ambiguous blocker identities have an explicit safe migration policy; no blanket board reset is performed.
+
+**Non-goals:** disabling circuit breakers, changing `kanban.failure_limit` as a substitute, or automatically redispatching all triage cards.
 
 ## Maintenance and release discipline
 
