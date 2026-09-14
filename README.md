@@ -3,6 +3,8 @@
 </p>
 
 # Hermes Agent ☤
+
+> **Rayopay maintenance fork:** see [the downstream change register](DOWNSTREAM.md) for proposed fixes, motivation, verification requirements, and implementation/deployment status. The initial groundwork is documentation-only; no fixes are implemented by it. The installation instructions below still target upstream Hermes, not a tested Rayopay release channel.
 <p align="center">
   <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> | <a href="https://hermes-agent.nousresearch.com/">Hermes Desktop</a>
 </p>
