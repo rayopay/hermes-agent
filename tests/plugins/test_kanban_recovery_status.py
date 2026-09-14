@@ -10,6 +10,7 @@ from hermes_cli import kanban_db as kb, kanban_db_connect as kbc
 
 @pytest.mark.parametrize("scenario", ["hold", "ordinary", "review"])
 def test_dashboard_reports_final_status_and_native_unblock(tmp_path, monkeypatch, scenario):
+    """Report committed native status, not requested readiness, with inert termination."""
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "board.db"))
     from hermes_cli import profiles
     monkeypatch.setattr(profiles, "profile_exists", lambda name: True)

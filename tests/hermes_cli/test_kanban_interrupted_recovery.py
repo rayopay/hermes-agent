@@ -24,6 +24,7 @@ PR = "Possible reference: https://github.com/disposable/recovery-test/pull/1"
 
 @pytest.fixture
 def board(tmp_path, monkeypatch, request):
+    """Keep native SQLite recovery observable while workers and signals stay inert."""
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -36,6 +37,7 @@ def board(tmp_path, monkeypatch, request):
     # Inject only the OS signalling boundary: never signal a real process.
     signals = []
     def signal(pid, sig):
+        """Record only the sentinel PID's signal and simulate an absent process."""
         assert pid == PID
         signals.append((pid, int(sig)))
         raise ProcessLookupError(pid)
@@ -44,6 +46,7 @@ def board(tmp_path, monkeypatch, request):
     db_path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
     spawns, ticks = [], []
     def spawn(task, workspace, *, board=None):
+        """Verify the claim is committed and exclusive without launching a worker."""
         assert Path(workspace).resolve().is_relative_to(home.resolve())
         with kbc.connect() as other:
             committed = kb.get_task(other, task.id)
@@ -69,6 +72,7 @@ def board(tmp_path, monkeypatch, request):
 
 
 def _tick(board):
+    """Record native dispatch results and reject unrelated lock or memory skips."""
     result = kbd.dispatch_once(board["conn"], spawn_fn=board["spawn"], max_spawn=1)
     board["ticks"].append(asdict(result))
     assert not result.skipped_locked
@@ -77,6 +81,7 @@ def _tick(board):
 
 
 def _new(board, *, claim=True, old=False, max_retries=None):
+    """Create native task history with an optional reference predating the claim."""
     conn = board["conn"]
     tid = kb.create_task(conn, title="Recovery contract", assignee="worker",
                          workspace_kind="scratch", max_retries=max_retries)
@@ -91,11 +96,13 @@ def _new(board, *, claim=True, old=False, max_retries=None):
 
 
 def _holds(conn, tid):
+    """Separate interrupted-implementation holds from unrelated blocked events."""
     return [e for e in kb.list_events(conn, tid) if e.kind == "blocked"
             and e.payload.get("reason_code") == "interrupted_implementation"]
 
 
 def _age(conn, tid):
+    """Age the disposable claim and run to exercise expiry paths without waiting."""
     with kb.write_txn(conn):
         conn.execute("UPDATE tasks SET started_at = ?, claim_expires = ?, last_heartbeat_at = NULL WHERE id = ?",
                      (int(time.time()) - 10000, int(time.time()) - 10, tid))
@@ -106,6 +113,7 @@ def _age(conn, tid):
 @pytest.mark.parametrize("route", ["clean", "nonzero", "ttl", "timeout", "stale", "manual", "orphan", "budget"])
 @pytest.mark.parametrize("reference", ["new", "old", "none"])
 def test_only_interrupted_attempt_evidence_requires_owner_reconciliation(board, monkeypatch, route, reference):
+    """Require reconciliation only for current-attempt references across recovery routes."""
     conn = board["conn"]
     tid, old_run = _new(board, old=reference == "old")
     if reference == "new":
@@ -181,6 +189,7 @@ def test_only_interrupted_attempt_evidence_requires_owner_reconciliation(board, 
     "losing_reclaim", "exhausted_clean", "exhausted_nonzero", "auth", "rate_limit", "dependency",
     "recent_success", "legacy_new", "legacy_old", "legacy_same_second", "ended_run", "notifier", "rollback"])
 def test_continuation_and_existing_safeguards(board, monkeypatch, scenario):
+    """Preserve native continuation, retry guards and rollback around recovery holds."""
     conn = board["conn"]
     tid, run_id = _new(board, claim=scenario != "ready", max_retries=1 if scenario.startswith("exhausted") else None)
     comment_id = kb.add_comment(conn, tid, "worker", PR)
@@ -219,6 +228,7 @@ def test_continuation_and_existing_safeguards(board, monkeypatch, scenario):
         # A genuine native handoff+successor wins after the reclaimer selected
         # its old row. The old PID/lock CAS must not close or hold the successor.
         def change_owner(pid, lock, **kwargs):
+            """Commit a competing native review claim instead of terminating a process."""
             with kbc.connect() as other:
                 assert kb.request_review(other, tid, reviewer="reviewer", expected_run_id=run_id)
                 successor = kb.claim_review_task(other, tid, claimer="different-host:successor")

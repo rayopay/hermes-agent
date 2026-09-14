@@ -13,6 +13,7 @@ from hermes_cli import kanban_db_notify as kbn
 @pytest.mark.parametrize("kind", ["crashed", "timed_out"])
 @pytest.mark.parametrize("split", [False, True])
 def test_current_hold_survives_batches_and_later_attempts(tmp_path, monkeypatch, kind, split):
+    """Keep notifications tied to the current native hold across cursor and run changes."""
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "board.db"))
     monkeypatch.setenv("HERMES_KANBAN_CRASH_GRACE_SECONDS", "0")
     monkeypatch.setattr(kb, "_pid_alive", lambda pid: False)
@@ -20,6 +21,7 @@ def test_current_hold_survives_batches_and_later_attempts(tmp_path, monkeypatch,
     monkeypatch.setattr(kbd, "_kill_fn", lambda fn=None: lambda *args: None)
     sent = []
     async def send(chat, text, **kwargs):
+        """Capture formatted delivery locally without contacting a messaging adapter."""
         sent.append(text)
     adapter = SimpleNamespace(send=send)
     runner = SimpleNamespace(adapters={Platform.TELEGRAM: adapter},

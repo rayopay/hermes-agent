@@ -14,6 +14,7 @@ PR = "Possible reference https://github.com/disposable/recovery-test/pull/1"
 
 @pytest.fixture
 def board(tmp_path, monkeypatch):
+    """Isolate native claim races in SQLite with inert process checks and termination."""
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -35,12 +36,14 @@ def board(tmp_path, monkeypatch):
 
 
 def _holds(conn, tid):
+    """Select recovery holds so other blocked events cannot satisfy the assertions."""
     return [e for e in kb.list_events(conn, tid) if e.kind == "blocked"
             and e.payload.get("reason_code") == "interrupted_implementation"]
 
 
 @pytest.mark.parametrize("reference", ["new", "old", "none"])
 def test_dangling_claim_closes_once_and_requires_owner_only_for_new_reference(board, reference):
+    """Preserve dangling-run history while fencing replay only for new references."""
     conn = board
     tid = kb.create_task(conn, title="Dangling claim", assignee="worker", workspace_kind="scratch")
     if reference == "old":
@@ -69,6 +72,7 @@ def test_dangling_claim_closes_once_and_requires_owner_only_for_new_reference(bo
     assert len(_holds(conn, tid)) == 1
     assert _holds(conn, tid)[0].run_id == run_id
     def refuse_spawn(*args, **kwargs):
+        """Fail at the spawn boundary if native dispatch admits the held task."""
         pytest.fail("held task must not spawn")
     for _ in range(2):
         assert not kbd.dispatch_once(conn, spawn_fn=refuse_spawn, max_spawn=1).spawned
@@ -83,6 +87,7 @@ def test_dangling_claim_closes_once_and_requires_owner_only_for_new_reference(bo
 
 @pytest.mark.parametrize("race", [True, False])
 def test_null_lock_manual_reclaim_cannot_erase_concurrent_orphan_hold(board, monkeypatch, race):
+    """Ensure a losing reclaim preserves a hold committed by native orphan recovery."""
     conn = board
     tid = kb.create_task(conn, title="Orphan race", assignee="worker", workspace_kind="scratch")
     original = kb.claim_task(conn, tid)
@@ -91,6 +96,7 @@ def test_null_lock_manual_reclaim_cannot_erase_concurrent_orphan_hold(board, mon
         conn.execute("UPDATE tasks SET claim_lock=NULL, claim_expires=NULL, worker_pid=NULL WHERE id=?", (tid,))
     settled = {}
     def terminate(*args, **kwargs):
+        """Optionally commit competing recovery at the inert termination boundary."""
         if race:
             # Inject at the real out-of-transaction termination boundary. The
             # competing writer uses its own connection and native recovery.
