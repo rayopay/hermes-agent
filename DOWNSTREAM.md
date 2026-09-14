@@ -28,8 +28,9 @@ Status meanings:
 
 1. **RP-HERMES-001 — PR-linked continuation without a blanket 24-hour delay**
    - Priority: first implementation.
-   - Status: **Authorized development — conservative interrupted-handoff recovery selected**.
-   - Implementation PR: not opened.
+   - Status: **In review — focused tests pass; full-suite/release qualification outstanding**.
+   - Implementation PR: [rayopay/hermes-agent#3](https://github.com/rayopay/hermes-agent/pull/3).
+   - Implementation checkpoint: `7d6d752af0e00633178d187711846bceed57b215`, based on `d77d61287012a53fe915c11e950bbcc72a0a7630`; subsequent documentation-only commits do not change this executable checkpoint.
    - Merge / deployment: neither performed.
 2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
    - Priority: queued after RP-HERMES-001.
