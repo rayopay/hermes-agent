@@ -63,6 +63,7 @@ jobs:
           set -euo pipefail
           home="$(mktemp -d "$RUNNER_TEMP/kanban-probe.XXXXXX")"
           env -i HOME="$home" TMP="$home" PATH="$PATH" \
+            HERMES_DELEGATED_CHILD_CONTEXT="${HERMES_DELEGATED_CHILD_CONTEXT:-}" \
             .venv/bin/python -B evals/kanban_pr_acceptance_live.py "$PWD" \
             > "$RUNNER_TEMP/kanban-probe.json"
           .venv/bin/ruff check --select F \
