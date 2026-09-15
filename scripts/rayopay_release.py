@@ -87,8 +87,18 @@ def assert_ancestor(repo: Path, ancestor: str, head: str) -> None:
         raise Refusal("Candidate would omit the installed revision or ancestry is unavailable")
 
 
+def reject_git_overrides() -> None:
+    """Reject inherited repository/config redirection before any Git operation."""
+    if any(k.startswith("GIT_CONFIG") or k in {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE"
+    } for k in os.environ):
+        raise Refusal("Inherited Git overrides require explicit reconciliation")
+
+
 def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
             downstream_sha: str, upstream_source: str) -> dict:
+    reject_git_overrides()
     repo, installed = exact_path(repo), exact_path(installed)
     operation = exact_path(operation, exists=False)
     sha(upstream_sha); sha(downstream_sha)
@@ -121,7 +131,8 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             git(repo, "fetch", "--no-tags", upstream_source, upstream_sha)
-            assert_ancestor(repo, deployed["head"], upstream_sha)
+            # An installed fork merge need not belong to official upstream.
+            # Validate its retention against the combined candidate below.
             candidate = operation / "candidate"
             git(repo, "worktree", "add", "--detach", str(candidate), downstream_sha)
             git(repo, "worktree", "lock", "--reason", "Retained reviewed-release candidate", str(candidate))
@@ -164,6 +175,7 @@ def bundle(operation: Path) -> dict:
     installed checkout must already contain the prerequisite. That keeps the
     transport bounded and allows exact-commit, network-independent Git testing.
     """
+    reject_git_overrides()
     release = load_release(operation)
     candidate = Path(release["candidate"])
     head = release["combined"]["head"]
@@ -208,11 +220,7 @@ def verify(operation: Path, expected_sha: str, expected_origin: str, expected_br
     The receipts are local evidence, not signatures or proof of human approval.
     No fetch, pause, service operation, or updater execution belongs here.
     """
-    if any(k.startswith("GIT_CONFIG") or k in {
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE",
-        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE"
-    } for k in os.environ):
-        raise Refusal("Inherited Git overrides require explicit reconciliation")
+    reject_git_overrides()
     sha(expected_sha)
     if expected_origin not in (FORK, UPSTREAM) or not expected_branch:
         raise Refusal("Expected canonical source and branch are required")

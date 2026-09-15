@@ -212,3 +212,62 @@ def test_verify_refuses_drift_without_modification(trees, tmp_path, monkeypatch,
     with pytest.raises(release.Refusal):
         release.verify(op, expected, release.UPSTREAM, "main")
     assert file_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("command", ["prepare", "bundle", "verify"])
+@pytest.mark.parametrize("override", ["GIT_CONFIG_COUNT", "GIT_INDEX_FILE", "GIT_DIR"])
+def test_cli_rejects_git_overrides_before_any_mutation(trees, tmp_path, command, override):
+    """Each public Git-using entry rejects inherited identity/config overrides."""
+    source, installed, downstream, upstream = trees
+    op = tmp_path / "operation"
+    if command != "prepare":
+        prepare(trees, op)
+    if command == "verify":
+        transport = release.bundle(op)
+    args = [sys.executable, "-B", str(SPEC.origin), command, "--operation", str(op)]
+    if command == "prepare":
+        args += ["--repo", str(source), "--installed", str(installed),
+                 "--upstream-sha", upstream, "--downstream-sha", downstream,
+                 "--upstream-source", str(installed)]
+    elif command == "verify":
+        args += ["--expected-sha", transport["sha"], "--expected-origin", release.UPSTREAM,
+                 "--expected-branch", "main"]
+    value = {"GIT_CONFIG_COUNT": "0", "GIT_INDEX_FILE": str(tmp_path / "alternate-index"),
+             "GIT_DIR": str(installed / ".git")}[override]
+    before = file_snapshot(tmp_path)
+    result = subprocess.run(args, text=True, capture_output=True, env={**os.environ, override: value})
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert json.loads(result.stdout)["reason"] == "Inherited Git overrides require explicit reconciliation"
+    assert file_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("preserve_installed", [True, False])
+def test_next_fork_release_checks_combined_ancestry(trees, tmp_path, preserve_installed):
+    """A later release retains the installed fork merge, not just upstream ancestry."""
+    source, installed, _, _ = trees
+    official = tmp_path / "official"
+    subprocess.run(["git", "clone", "-q", str(installed), str(official)], check=True)
+    git(official, "config", "user.name", "Fixture")
+    git(official, "config", "user.email", "fixture@example.invalid")
+    first = prepare(trees, tmp_path / "first")
+    merged = first["combined"]["head"]
+    for target in (installed, source):
+        git(target, "fetch", first["candidate"], merged)
+        git(target, "checkout", "--detach", merged)
+    downstream = commit(source, "next-fix.txt", "next downstream change\n")
+    upstream = commit(official, "next-upstream.txt", "next official change\n")
+    if not preserve_installed:
+        commit(installed, "must-preserve.txt", "installed-only commit\n")
+    before = file_snapshot(installed)
+    op = tmp_path / "second"
+    if preserve_installed:
+        result = release.prepare(source, installed, op, upstream, downstream, str(official))
+        assert result["status"] == "prepared-not-qualified"
+        candidate = Path(result["candidate"])
+        for ancestor in (merged, downstream, upstream):
+            release.assert_ancestor(candidate, ancestor, result["combined"]["head"])
+    else:
+        with pytest.raises(release.Refusal, match="omit the installed revision"):
+            release.prepare(source, installed, op, upstream, downstream, str(official))
+        assert json.loads((op / "release.json").read_text())["status"] == "blocked"
+    assert file_snapshot(installed) == before
