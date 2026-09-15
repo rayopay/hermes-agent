@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** documentation and fork groundwork only. None of the three changes below is implemented or deployed by this PR. Work proceeds issue by issue, starting with the 24-hour PR cooldown.
+**Current scope:** qualify and roll out RP-HERMES-001: remove the blanket PR-comment cooldown and hold only ambiguous interrupted implementation recovery for owner reconciliation. Publication, merge and local deployment are authorized, subject to the remaining technical gates; the change is not yet accepted or deployed. CI-policy discovery and triage changes remain queued separately.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -17,6 +17,7 @@ This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/N
 Status meanings:
 
 - **Proposed:** a direction and acceptance criteria, not a finalized API or working feature.
+- **Authorized development:** the behavior is approved and local implementation is active; no implementation PR is open yet.
 - **In implementation:** an implementation PR exists and work is actually active.
 - **In review:** code and verification evidence are submitted, with outstanding review identified.
 - **Merged:** accepted into the fork; not necessarily deployed.
@@ -27,8 +28,9 @@ Status meanings:
 
 1. **RP-HERMES-001 — PR-linked continuation without a blanket 24-hour delay**
    - Priority: first implementation.
-   - Status: **Proposed — implementation not started**.
-   - Implementation PR: not opened.
+   - Status: **In review — focused tests pass; full-suite/release qualification outstanding**.
+   - Implementation PR: [rayopay/hermes-agent#3](https://github.com/rayopay/hermes-agent/pull/3).
+   - Implementation checkpoint: `7d6d752af0e00633178d187711846bceed57b215`, based on `d77d61287012a53fe915c11e950bbcc72a0a7630`; subsequent documentation-only commits do not change this executable checkpoint.
    - Merge / deployment: neither performed.
 2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
    - Priority: queued after RP-HERMES-001.
@@ -43,33 +45,19 @@ Status meanings:
 
 ## RP-HERMES-001: PR-linked continuation
 
-### Observed behavior and motivation
+Remove the blanket PR-comment cooldown so eligible work can continue on the same
+card and PR. Retain a durable native hold only when an implementation run is
+interrupted before handoff and newly recorded evidence makes publication uncertain;
+the owner reconciles existing work before resuming it. Existing claim, review,
+authentication, dependency and retry protections remain in place.
 
-At the audited baseline, `check_respawn_guard` scans recent task comments for a GitHub PR URL. A matching comment triggers `active_pr` for a fixed 86,400-second window on the Ready dispatch lane. Review dispatch is exempt. The guard does not query whether the PR is open, merged, or closed, and an explicit changes-requested event does not override the PR-comment check. Repeating a full PR URL in another comment starts another matching window.
+**Design and decisions:** [RP-HERMES-001.md](RP-HERMES-001.md) records the rationale,
+chosen behaviour, rejected alternatives, acceptance criteria, implementation,
+verification checkpoints, migration/recovery impact and non-goals.
 
-This protects against duplicate publication, but also prevents legitimate continuation of the same task/PR after review or during unfinished finalization. Moving a card to Ready does not prove that it can dispatch. It is not a universal ban on reading or updating a card.
-
-Baseline source: [`hermes_cli/kanban_db_dispatch.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_db_dispatch.py), `_RESPAWN_GUARD_PR_WINDOW` and `check_respawn_guard`.
-
-### Proposed fix
-
-Replace comment age as the sole authority for blocking legitimate continuation with an explicit, audited continuation decision integrated into the native lifecycle. Reuse the existing task and PR identity; distinguish continuation from another attempt to publish the same work. Prefer the smallest correct extension of existing review/dispatch machinery over a parallel scheduler or a general-purpose policy framework.
-
-The implementation design must settle how publication identity and continuation authorization are represented, who may request continuation, how that authorization is consumed or invalidated, and how older cards are treated. No configuration key, command name, or database field is promised by this document.
-
-Do not merely set the timeout to zero, discard PR comments, relabel implementation as review, or add an unrestricted force-spawn path. A shorter configurable delay alone does not resolve the lifecycle mismatch.
-
-### Acceptance criteria
-
-- An authorized changes-requested or unfinished-finalization continuation can become eligible without waiting 24 hours, while reusing its existing task/PR.
-- Without valid continuation authorization, duplicate-publication prevention remains effective; adding prose cannot grant authorization or prolong an authorized continuation's delay.
-- An existing worker, claim, dependency hold, or runtime/workspace owner cannot be displaced by the continuation path. Concurrent attempts cannot create duplicate workers.
-- Authorization is scoped to the task and relevant lifecycle/PR identity, audited, and cannot be replayed after ownership or relevant work identity changes.
-- Review-lane behavior, authentication/rate-limit guards, and unrelated recent-success safeguards remain intact.
-- Older cards retain their historical evidence and safe behavior; migration and fallback decisions are explicit.
-- Real native-path regression tests cover authorized continuation, unauthorized repetition, stale authorization, and competing dispatch attempts. User-facing diagnostics distinguish eligibility, a hold, and a verified running worker.
-
-**Non-goals:** changing triage recurrence, weakening completion/CI checks, creating replacement cards or sibling PRs, or deploying a runtime change in this documentation PR.
+The combined candidate's focused tests pass. Broader qualification and release
+gates remain open; neither merge nor deployment has occurred. Documentation-only
+reorganisation does not itself require or trigger additional tests.
 
 ## RP-HERMES-003: CI acceptance and policy discovery
 
