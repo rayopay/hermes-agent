@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current branch scope:** RP-HERMES-003 implementation and isolated verification only. The branch removes required-check policy discovery while retaining reported exact-head CI acceptance. It has not been published, merged or deployed. Other change entries are inherited from this branch's fork-main base; their separate implementation branches remain outside this change.
+**Current branch scope:** RP-HERMES-003 implementation and isolated verification. The branch removes required-check policy discovery while retaining reported exact-head CI acceptance. It is submitted for review in [PR #5](https://github.com/rayopay/hermes-agent/pull/5), not merged or deployed. Other change entries are inherited from this branch's fork-main base; their separate implementation branches remain outside this change.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -33,8 +33,8 @@ Status meanings:
    - Merge / deployment: neither performed.
 2. **RP-HERMES-003 — reported exact-head CI acceptance without policy discovery**
    - Priority: approved as a narrow, independent change.
-   - Status: **Locally verified — scoped independent review complete; publication/release outstanding**.
-   - Implementation PR: not opened; branch `fix/ci-status-without-policy-discovery`.
+   - Status: **In review — scoped local verification complete; PR review/release qualification outstanding**.
+   - Implementation PR: [rayopay/hermes-agent#5](https://github.com/rayopay/hermes-agent/pull/5); branch `fix/ci-status-without-policy-discovery`.
    - Base: `d77d61287012a53fe915c11e950bbcc72a0a7630`; implementation checkpoint: `0b3bd403443b7264ba63d274be414a8a85034ff5`.
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
@@ -102,7 +102,7 @@ Canonical `scripts/run_tests.sh`, with credential-free scratch HOME and isolated
 
 The unchanged-base reported-CI regression attempt is preserved separately (63 failures, 2 passes; some failures reflect new receipt fields rather than changed acceptance outcomes). Independent review then found ambiguous duplicate legacy-status IDs and malformed identifier/PR-state acceptance. Added native tests reproduced 13 unsafe acceptances before correction; the final matrix and broader suite pass after rejecting duplicate status IDs, requiring positive identifiers and checking PR-state consistency. Independent re-review found both issues addressed and no remaining actionable blocker within its bounded scope.
 
-A separate read-only collector canary against an existing public fork PR exercised actual GitHub/`gh` response shapes without a board transition. A successful bot status plus a skipped check satisfied the approved reported-CI rule; this is not proof that a build/test workflow ran, nor a private-repository billing-plan test. Existing expected-check limitations remain explicit above. No live worker completion, publication, merge, deployment or rollback drill was performed.
+A separate read-only collector canary against an existing public fork PR exercised actual GitHub/`gh` response shapes without a board transition. A successful bot status plus a skipped check satisfied the approved reported-CI rule; this is not proof that a build/test workflow ran, nor a private-repository billing-plan test. Existing expected-check limitations remain explicit above. The canary performed no live worker completion or publication. No merge, deployment or rollback drill was performed.
 
 No schema/configuration migration or automatic card recovery is introduced. Existing PR bindings, ownership guards and historical receipts remain intact. Previously held cards require a separately authorized native disposition; no live boards are changed. Rollback restores the previous collector and documentation, which reinstates policy discovery for future attempts; it does not reverse completed tasks or rewrite historical `reported-ci` receipts.
 
