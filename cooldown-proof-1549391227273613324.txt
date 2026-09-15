@@ -1,0 +1,1 @@
+Disposable Hermes cooldown lifecycle test.
