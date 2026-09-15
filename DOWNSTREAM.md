@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** documentation and fork groundwork only. None of the three changes below is implemented or deployed by this PR. Work proceeds issue by issue, starting with the 24-hour PR cooldown.
+**Current scope:** RP-HERMES-002 incremental implementation and isolated validation. The first reviewed increment prevents category changes from resetting unclassified recurrence; stable blocker identity and orchestrator recovery remain outstanding. This branch is not merge/deployment-ready. Other change entries below retain their groundwork baseline; their independent implementation is tracked in PRs #3 and #5, not included in this branch.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -37,10 +37,10 @@ Status meanings:
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: third downstream change; developed independently of the open RP-HERMES-001/003 changes, with combined qualification required before release.
-   - Status: **Authorized development — approved behaviour documented; technical design under review**.
+   - Status: **In implementation — first counter-protection increment tested and independently reviewed; identity/recovery outstanding**.
    - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
    - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
-   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), draft. Test-first implementation is starting; no feature-test pass is claimed by the design document.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. First increment: 5 causal failures before the fix; 6 focused passes and 61 passes in the eight-file regression suite afterward. These are overlapping totals, not disjoint test sets.
    - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation

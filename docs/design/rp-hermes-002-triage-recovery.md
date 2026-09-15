@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-Tracking PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6) (draft; implementation and verification in progress).
+Tracking PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6) (ready for review; implementation and verification in progress, not merge/deployment ready).
 
-**Behaviour approved for implementation; technical design under review.** This document formalises the decisions agreed for RP-HERMES-002. It is not evidence that implementation, tests, publication, merge, deployment or live-card recovery have completed.
+**Behaviour approved; incremental implementation in progress.** This document formalises the agreed RP-HERMES-002 behaviour. The first counter-protection increment has focused test and independent review evidence below; the complete recovery feature, integration, merge, deployment and live-card recovery remain outstanding.
 
 Develop in a dedicated branch of the maintained Hermes fork. Do not modify the installed runtime, live boards, profile permissions, product workspaces or running workers. Publication, release and live-card disposition are separate actions. Product orchestration remains with its owning PM; Hermes maintenance remains with Default.
 
@@ -126,6 +126,35 @@ Prefer additive, minimal state. Select event payloads versus schema additions on
 6. Run focused and broader Kanban regressions through `scripts/run_tests.sh`, with credential-free scratch HOME and worktree-local dependency state. Bound resource use and preserve logs. Report unavailable dependencies, baseline failures, mocks and unexecuted paths honestly.
 7. Test interaction with RP-HERMES-001 and RP-HERMES-003 in a separate integration candidate once appropriate; they are separate open changes, not implicitly included in this branch.
 8. Publish/merge/deploy only under the applicable separate approval and release process. Deployment requires exact backups, drained owners, isolated migration rehearsal, rollback plan and live verification.
+
+## Selected incremental implementation direction
+
+Technical review rejected a task-wide autonomous-recovery cap and a new mandatory human-renewal system: neither is necessary to implement the agreed blocker-specific protection. Keep the existing recurrence threshold per unresolved blocker/cycle. Retry preserves the count and does not override an exhausted cycle; an evidenced resolution can begin the acknowledged blocker's next cycle. No additional above-threshold retry allowance is introduced by default. Real subsequent fixes may qualify without an arbitrary task-lifetime ceiling.
+
+The runtime checks exact identity, event order, stale observations and consumed evidence references. The trusted owning orchestrator assesses whether an external remedy is substantively new and relevant. This is not a proof that software can detect every false assertion or place an absolute bound on dishonest trusted-owner decisions.
+
+Implement stable identities and conservative classification in a topical native module before enabling release. Use an additive per-task projection, revision and append-only event history; categories remain descriptive. Classification alone does not resume a card. Follow with exact-event recovery through the existing orchestrator tool/native boundary and supported runtime-settlement checks, then shared no-Ready finalization of accepted work. Each slice requires native tests and sequential specification/quality reviews.
+
+Mixed old/new writers are not an approved deployment mode. Release and rollback must drain writers and preserve compatible code/state backups; generic mixed-binary trigger infrastructure is not implicitly part of this feature. Unknown process ownership or accepted-work phase remains a hold, not a reason to bypass existing protections.
+
+## First implementation increment: verified evidence
+
+Base of this increment: `de3b208a9948e2b3e4ed67120bd06d0f1bc11b75`; feature branch base remains `d77d61287012a53fe915c11e950bbcc72a0a7630`.
+
+The only executable change in this increment makes `_route_block` increment the preserved count for all non-dependency, unclassified reports. The dependency branch is unchanged. This prevents category changes and dependency interludes from erasing unresolved recurrence; **it does not yet distinguish established blockers or enable orchestrator triage recovery**. It must not be deployed on its own as the solution to repeated triage.
+
+Canonical `scripts/run_tests.sh`, isolated credential-free HOME, real disposable SQLite lifecycle:
+
+- Unchanged-production causal red: **5 assertion failures, 1 pass**, exit 1; no setup/collection errors.
+- Candidate focused green: **6 passed**, exit 0.
+- Eight-file related suite: **61 passed**, exit 0, including those six cases.
+- Independent specification and code-quality reviews approved this bounded increment only; full-feature acceptance remains outstanding.
+
+The new tests use native create/claim/block/unblock/link/complete/readiness paths, not real application workers or external provider effects. Source SHA-256 for the tested `hermes_cli/kanban_db.py`: `a10824b99f6ad38b3d89766f02488b27afa1e40124dfb199fda52215f78ed869`. New test-file SHA-256: `4cbc8af8a849d47a64686b6d192e8da0d2a90ef74f028b4c895d1a21a98bd3de`.
+
+Environment: Python 3.12.3, pytest 9.1.1, 85 distributions from unchanged existing core/dev lock selections. A `--locked` preparation attempt refused stale option metadata; an explicitly reviewed `--frozen` existing-lock path was used after verifying the selected direct requirements match. This is not lock-freshness qualification or a lock repair. The original install exit was lost when the private monitoring wrapper failed; independent offline consistency, unchanged frozen-sync dry-run, genuine library imports and identical pre/post distribution metadata established the resulting environment without repeating installation. Generated bytecode is not claimed unchanged. These limits remain part of the evidence.
+
+No full-suite, real-worker/process-tree, dashboard application, migration, external acceptance, merge, deployment or live-card recovery proof is claimed by this increment.
 
 ## Technical questions to settle during design review
 
