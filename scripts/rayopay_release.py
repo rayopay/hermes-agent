@@ -44,7 +44,7 @@ def exact_path(value: str | Path, *, exists: bool = True) -> Path:
 def run(argv: list[str], *, cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess:
     # No shell interpolation. Hooks cannot execute incidental host code during
     # preparation; this does not change native Hermes approval configuration.
-    return subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout,
+    return subprocess.run(argv, cwd=cwd, text=True, encoding="utf-8", capture_output=True, timeout=timeout,
                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"})
 
 
@@ -60,7 +60,7 @@ def atomic_json(path: Path, value: dict) -> None:
     tmp = path.with_name(path.name + ".pending")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        with os.fdopen(fd, "w") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(value, stream, indent=2)
             stream.write("\n")
             stream.flush()
@@ -127,7 +127,7 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
     # A common-directory lock serializes this wrapper's metadata operations.
     # Git's own locks still protect against independent Git callers.
     lock_path = Path(source["common_dir"]) / "rayopay-release.lock"
-    with lock_path.open("a") as lock:
+    with lock_path.open("a", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             git(repo, "fetch", "--no-tags", upstream_source, upstream_sha)
@@ -138,7 +138,7 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
             git(repo, "worktree", "lock", "--reason", "Retained reviewed-release candidate", str(candidate))
             merged = run(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Rayopay Hermes maintenance",
                           "-c", "user.email=noreply@rayopay.io", "merge", "--no-ff", "--no-edit", upstream_sha], cwd=candidate)
-            (operation / "merge.log").write_text(merged.stdout + merged.stderr)
+            (operation / "merge.log").write_text(merged.stdout + merged.stderr, encoding="utf-8")
             if merged.returncode:
                 receipt.update(status="blocked", reason="merge failed; candidate and conflict evidence retained",
                                conflict_paths=git(candidate, "diff", "--name-only", "--diff-filter=U").splitlines())
@@ -159,7 +159,7 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
 def load_release(operation: Path) -> dict:
     operation = exact_path(operation)
     path = exact_path(operation / "release.json")
-    result = json.loads(path.read_text())
+    result = json.loads(path.read_text(encoding="utf-8"))
     if result.get("schema") != 1 or result.get("status") != "prepared-not-qualified":
         raise Refusal("A successfully prepared candidate is required")
     candidate = exact_path(result["candidate"])
@@ -227,7 +227,7 @@ def verify(operation: Path, expected_sha: str, expected_origin: str, expected_br
     operation = exact_path(operation)
     try:
         release = load_release(operation)
-        transport = json.loads(exact_path(operation / "bundle.json").read_text())
+        transport = json.loads(exact_path(operation / "bundle.json").read_text(encoding="utf-8"))
         if not isinstance(transport, dict):
             raise Refusal("Malformed bundle manifest")
         branch = "rayopay-release/" + expected_sha
@@ -309,7 +309,7 @@ def main() -> int:
         elif args.command == "verify":
             result = verify(args.operation, args.expected_sha, args.expected_origin, args.expected_branch)
         else:
-            result = json.loads(exact_path(args.operation / "release.json").read_text())
+            result = json.loads(exact_path(args.operation / "release.json").read_text(encoding="utf-8"))
         print(json.dumps(result, indent=2))
         return 2 if result.get("status") == "blocked" else 0
     except (Refusal, OSError, ValueError, subprocess.TimeoutExpired) as exc:

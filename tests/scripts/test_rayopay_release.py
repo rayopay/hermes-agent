@@ -29,6 +29,17 @@ def commit(path, name, text):
     return git(path, "rev-parse", "HEAD")
 
 
+@pytest.fixture(autouse=True)
+def isolated_git_environment(monkeypatch):
+    """Isolate Git inputs only; retain Hermes execution-authority markers."""
+    for key in tuple(os.environ):
+        if key.startswith("GIT_CONFIG") or key in {
+            "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE",
+            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE",
+        }:
+            monkeypatch.delenv(key)
+
+
 @pytest.fixture
 def trees(tmp_path):
     installed = tmp_path / "installed"
