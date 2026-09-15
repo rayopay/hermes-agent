@@ -57,22 +57,33 @@ URL binds the card permanently; retries cannot substitute a green sibling PR.
 CLI `show --json` and `kanban_show` expose the persisted contract.
 
 The shared `complete_task` boundary covers worker tools, CLI, review approval and
-dashboard completion. It reads classic branch protection and active ruleset
-required contexts, paginates exact-head check runs and legacy statuses, then
-re-reads the PR head/base. Optional failed/skipped telemetry does not veto accepted
-required checks. Missing, pending, failed, cancelled, timed-out, stale, skipped or
-neutral **required** evidence cannot complete the card. Neither can zero-run
-acceptance, unreadable policy or GitHub API failures. A repository without required
-checks needs a local-only contract. `gh` must be authenticated with read access to
-the repository's checks and rules; no remote writes are performed by this gate.
+dashboard completion. It reads the current PR head SHA and base, paginates latest
+exact-head check runs and legacy statuses, then re-reads PR head/base/state.
+**All reported CI counts**, with no required-versus-optional distinction: even
+an optional failure blocks completion. Failures, cancellations, timeouts,
+action-required, pending, unknown and stale evidence reject completion, as do
+unreadable or incomplete API responses. Completed `skipped` and `neutral` check
+runs are non-blocking **only when at least one reported check or status succeeds**.
+Zero evidence and all-skipped/neutral evidence reject completion.
+
+There is **no branch-protection or ruleset policy discovery**, and no replacement
+operator policy/configuration. This does not detect expected checks that never
+report, or prove that branch protection permits merging. The latest legacy status
+per context replaces its older history. Check reruns are selected within the same
+name, App and check suite; different Apps/suites and legacy statuses cannot mask
+each other's failures. `gh` 2.48+ must have repository read access to PRs, checks and
+statuses; all collector requests are read-only. Local-only contracts do no GitHub
+I/O and are not a way to downgrade an existing PR contract.
 
 Rejection retains the active card and workspace. Durable `pr_acceptance` events
-store PR URL, SHA, required contexts, check IDs/URLs, classifications and recovery
-instructions; `last_failure_error` surfaces the next step. Fix failures, rerun
-infrastructure checks or wait, then retry completion. Use `kanban_block` when
+record the `reported-ci` acceptance basis, PR URL, SHA/base/state, selected check
+IDs/URLs, App/suite identity, statuses, conclusions, classifications and recovery
+instructions; `last_failure_error` surfaces the next step without raw CLI stderr.
+Fix failures, rerun CI or wait, then retry completion. Use `kanban_block` when
 human action is needed. Generic GitHub `failure` cannot establish whether a test
 or artifact upload failed; inspect its retained URL. Explicit infrastructure
-conclusions and API failures are classified separately. No extra worker is spawned.
+conclusions and API failures are classified separately. No extra worker is spawned,
+and this change does not automatically recover or redispatch previously held cards.
 
 Receipt persistence and the terminal write recheck run/status/contract ownership
 under one SQLite lock: a reclaimed worker cannot complete or attach acceptance to

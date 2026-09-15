@@ -1,0 +1,84 @@
+name: Rayopay Kanban CI
+
+# Bounded qualification for RP-HERMES-003, not the inherited release pipeline.
+# Push runs bind evidence directly to the PR head, not a synthetic merge commit.
+on:
+  push:
+    branches: [fix/ci-status-without-policy-discovery]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rayopay-kanban-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  kanban:
+    if: github.repository == 'rayopay/hermes-agent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
+        with:
+          version: '0.9.28'
+          enable-cache: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11.15'
+
+      - name: Prepare locked test dependencies
+        # Gateway wake tests exercise Telegram/aiohttp from the messaging extra.
+        run: |
+          uv sync --locked --python 3.11.15 --extra dev --extra messaging --no-install-project
+          git diff --exit-code -- pyproject.toml uv.lock
+
+      - name: Run scoped canonical tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$(mktemp -d "$RUNNER_TEMP/kanban-home.XXXXXX")"
+          export TMP="$HOME"
+          export HERMES_TEST_FILE_RETRIES=0
+          git rev-parse HEAD
+          .venv/bin/python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/kanban-tests.log"
+          from pathlib import Path
+          import subprocess
+          files = sorted(str(p) for p in Path('tests').rglob('test_*.py') if 'kanban' in p.name)
+          if not files:
+              raise SystemExit('No Kanban test files discovered; refusing an empty run')
+          print(f'Test inventory ({len(files)} files):', *files, sep='\n', flush=True)
+          subprocess.run(['bash', 'scripts/run_tests.sh', '-j', '2', '--file-timeout', '120', *files], check=True)
+          PY
+
+      - name: Run lifecycle probe and affected-file lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          home="$(mktemp -d "$RUNNER_TEMP/kanban-probe.XXXXXX")"
+          env -i HOME="$home" TMP="$home" PATH="$PATH" \
+            HERMES_DELEGATED_CHILD_CONTEXT="${HERMES_DELEGATED_CHILD_CONTEXT:-}" \
+            .venv/bin/python -B evals/kanban_pr_acceptance_live.py "$PWD" \
+            > "$RUNNER_TEMP/kanban-probe.json"
+          .venv/bin/ruff check --select F \
+            hermes_cli/kanban_pr_acceptance.py hermes_cli/kanban_parser.py \
+            tools/kanban_tools_schemas.py evals/kanban_pr_acceptance_live.py \
+            tests/hermes_cli/test_kanban_pr_acceptance.py tests/evals/test_kanban_pr_acceptance_live.py
+          git diff --exit-code
+
+      - name: Preserve qualification logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rayopay-kanban-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/kanban-tests.log
+            ${{ runner.temp }}/kanban-probe.json
+          if-no-files-found: warn
+          retention-days: 14
