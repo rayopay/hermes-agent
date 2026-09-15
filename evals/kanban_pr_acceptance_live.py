@@ -1,5 +1,8 @@
 """Reported-CI local HTTP/lifecycle probe; no live GitHub access or inference.
-Run: python evals/kanban_pr_acceptance_live.py ROOT
+Run from an authorized top-level test process:
+    python evals/kanban_pr_acceptance_live.py ROOT
+Delegated children must return this probe to their parent; a disposable database
+is not permission to remove the inherited delegated-child write fence.
 """
 import importlib.util
 import json
@@ -9,6 +12,15 @@ import tempfile
 
 root = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root))
+from agent.delegation_context import is_delegated_child_process_context
+
+if is_delegated_child_process_context():
+    raise SystemExit(
+        "Run this probe from an authorized top-level test process; "
+        "delegated children must ask their parent to run it. "
+        "Do not clear HERMES_DELEGATED_CHILD_CONTEXT."
+    )
+
 import pytest
 from hermes_cli import kanban_db as kb
 from hermes_cli.kanban_db_connect import connect

@@ -75,38 +75,13 @@ Do not merely set the timeout to zero, discard PR comments, relabel implementati
 
 ## RP-HERMES-003: CI acceptance and policy discovery
 
-### Observed behavior and motivation
+Native PR completion previously depended on GitHub branch-protection/rules APIs to discover required checks. On private repositories those reads can require a paid plan even when CI results are readable, preventing completion for reasons unrelated to the reported CI outcome.
 
-For an explicit PR completion contract, the native acceptance collector reads classic branch protection and the active-rules endpoint to discover required checks, then evaluates exact-head check runs and legacy statuses. Unreadable policy rejects completion.
+The approved narrow change removes policy discovery without replacing it with operator configuration. Hermes still verifies reported checks and commit statuses for the exact current PR head before completing a PR-linked task. It requires at least one success, permits completed skipped/neutral checks alongside success, and rejects blocking or unavailable evidence. PR contracts/binding, receipts and native ownership safeguards remain intact.
 
-GitHub can allow check-run reads while returning a plan-related HTTP 403 for rules on private repositories. This is a **required-policy discovery** dependency, not a general requirement to buy a plan merely to read CI. An individual account upgrade is not interchangeable with the applicable organization plan. Local-only contracts are a distinct existing mode, not a workaround for downgrading an already declared PR contract.
+The deliberate trade-off is that every reported failure counts, including optional failures, while expected checks that never appear cannot be detected. This is reported-CI acceptance—not proof that a build/test workflow ran, merge approval or deployment qualification. No schema/configuration migration or automatic live-card recovery is introduced.
 
-Baseline source: [`hermes_cli/kanban_pr_acceptance.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance.py), `collect_acceptance`, and [`hermes_cli/kanban_pr_acceptance_store.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance_store.py).
-
-### Approved behavior (supersedes the operator-policy proposal)
-
-Remove all required-check policy discovery, including branch-protection GraphQL and active-rules endpoints. Do not add an operator policy or configuration replacement. For explicit PR contracts, use only reported CI on the exact current head SHA, through the existing shared completion boundary.
-
-### Acceptance criteria
-
-- Paginate latest check runs and legacy statuses. All reported checks count: optional failures block, with no required-versus-optional distinction.
-- Reject failed, cancelled, timed-out, action-required, pending, unknown or stale evidence. Completed skipped/neutral check runs are allowed only alongside at least one successful check or legacy status. Zero evidence and all-skipped/neutral evidence reject.
-- Latest status per context supersedes older status history. Check reruns retain App and check-suite identity so same-named checks from different providers or suites cannot mask failures.
-- Preserve contract validation, permanent PR binding, local-only no-network behavior, shared completion ownership/CAS/store safeguards, and final PR head/base/state revalidation. Only read-only APIs are used.
-- Receipts record the `reported-ci` acceptance basis and exact selected evidence. API failures and malformed/incomplete evidence reject with phase-specific diagnostics, without raw stderr or secret-bearing exceptions.
-- Unreported expected checks are undetectable. Acceptance is a completion-time snapshot, not a mergeability decision, a distributed transaction or continuous monitoring.
-
-### Local verification and migration
-
-Canonical `scripts/run_tests.sh`, with credential-free scratch HOME and isolated per-file processes, completed all 90 Kanban-named test files: **701 passed, 0 failed, 2 skipped**. The acceptance file contains 97 passing cases, including native SQLite completion, read-only local HTTP pagination, tool dispatch, CLI parsing/completion, review ownership and the dashboard HTTP endpoint. The standalone local lifecycle probe and Ruff F checks also pass; tracked-source hashes were unchanged during each run. The worktree-local copied test environment passes `pip check`; its non-bytecode file manifest stayed unchanged through verification. This is scoped Linux verification, not the full repository suite, cross-platform certification or complete dependency-lock qualification.
-
-The unchanged-base reported-CI regression attempt is preserved separately (63 failures, 2 passes; some failures reflect new receipt fields rather than changed acceptance outcomes). Independent review then found ambiguous duplicate legacy-status IDs and malformed identifier/PR-state acceptance. Added native tests reproduced 13 unsafe acceptances before correction; the final matrix and broader suite pass after rejecting duplicate status IDs, requiring positive identifiers and checking PR-state consistency. Independent re-review found both issues addressed and no remaining actionable blocker within its bounded scope.
-
-A separate read-only collector canary against an existing public fork PR exercised actual GitHub/`gh` response shapes without a board transition. A successful bot status plus a skipped check satisfied the approved reported-CI rule; this is not proof that a build/test workflow ran, nor a private-repository billing-plan test. Existing expected-check limitations remain explicit above. The canary performed no live worker completion or publication. No merge, deployment or rollback drill was performed.
-
-No schema/configuration migration or automatic card recovery is introduced. Existing PR bindings, ownership guards and historical receipts remain intact. Previously held cards require a separately authorized native disposition; no live boards are changed. Rollback restores the previous collector and documentation, which reinstates policy discovery for future attempts; it does not reverse completed tasks or rewrite historical `reported-ci` receipts.
-
-**Non-goals:** billing/visibility changes, operator policy, merge/deployment, live card recovery, or changing RP-HERMES-001/RP-HERMES-002.
+**Status:** implementation submitted in [PR #5](https://github.com/rayopay/hermes-agent/pull/5), with scoped local verification; not merged or deployed. Detailed decisions, rejected alternatives, exact acceptance rules, verification scope and rollback considerations live in the [RP-HERMES-003 design decision record](docs/decisions/RP-HERMES-003-reported-ci-acceptance.md).
 
 ## RP-HERMES-002: Block recurrence and triage recovery
 
