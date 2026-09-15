@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** documentation and fork groundwork only. None of the three changes below is implemented or deployed by this PR. Work proceeds issue by issue, starting with the 24-hour PR cooldown.
+**Current branch scope:** RP-HERMES-003 implementation and isolated verification only. The branch removes required-check policy discovery while retaining reported exact-head CI acceptance. It has not been published, merged or deployed. Other change entries are inherited from this branch's fork-main base; their separate implementation branches remain outside this change.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -17,6 +17,7 @@ This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/N
 Status meanings:
 
 - **Proposed:** a direction and acceptance criteria, not a finalized API or working feature.
+- **Locally verified:** implementation and scoped local verification are complete; publication, PR review, release qualification and deployment are separate.
 - **In implementation:** an implementation PR exists and work is actually active.
 - **In review:** code and verification evidence are submitted, with outstanding review identified.
 - **Merged:** accepted into the fork; not necessarily deployed.
@@ -30,10 +31,11 @@ Status meanings:
    - Status: **Proposed — implementation not started**.
    - Implementation PR: not opened.
    - Merge / deployment: neither performed.
-2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
-   - Priority: queued after RP-HERMES-001.
-   - Status: **Proposed — implementation not started**.
-   - Implementation PR: not opened.
+2. **RP-HERMES-003 — reported exact-head CI acceptance without policy discovery**
+   - Priority: approved as a narrow, independent change.
+   - Status: **Locally verified — scoped independent review complete; publication/release outstanding**.
+   - Implementation PR: not opened; branch `fix/ci-status-without-policy-discovery`.
+   - Base: `d77d61287012a53fe915c11e950bbcc72a0a7630`; implementation checkpoint: `0b3bd403443b7264ba63d274be414a8a85034ff5`.
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: queued after RP-HERMES-003.
@@ -81,22 +83,30 @@ GitHub can allow check-run reads while returning a plan-related HTTP 403 for rul
 
 Baseline source: [`hermes_cli/kanban_pr_acceptance.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance.py), `collect_acceptance`, and [`hermes_cli/kanban_pr_acceptance_store.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance_store.py).
 
-### Proposed fix
+### Approved behavior (supersedes the operator-policy proposal)
 
-Add an explicitly selected, operator-controlled required-check policy source alongside native GitHub policy discovery. It must declare a nonempty check set scoped to the exact repository and target branch, include check-provider identity where required, and record its provenance/version in acceptance receipts. Keep the implementation at the shared completion boundary so tools, CLI, review approval, and dashboard cannot disagree.
-
-This operator policy is an explicit alternative authority, **not** a claim that unreadable GitHub rules are absent. Never switch to it automatically on a 403 or another API error. Its exact configuration interface and change-control semantics require design review.
+Remove all required-check policy discovery, including branch-protection GraphQL and active-rules endpoints. Do not add an operator policy or configuration replacement. For explicit PR contracts, use only reported CI on the exact current head SHA, through the existing shared completion boundary.
 
 ### Acceptance criteria
 
-- Explicitly selected operator policy permits verification without requiring the paid rules endpoint; the original GitHub-discovery mode remains available.
-- Required checks are nonempty, repository/base-scoped, and unavailable for workers to weaken through comments or completion metadata.
-- Missing, pending, failed, cancelled, stale, skipped, or neutral required evidence cannot satisfy completion. Optional check failures do not automatically veto valid required evidence.
-- Exact-head matching, check-App identity, pagination completeness, PR head/base revalidation, and transactional run ownership remain enforced.
-- Policy changes during collection invalidate the receipt or require a retry; policy identity and evidence remain auditable.
-- Unreadable policy, malformed configuration, and API failures reject completion with actionable diagnostics. Existing PR contracts are preserved, not changed to local-only.
+- Paginate latest check runs and legacy statuses. All reported checks count: optional failures block, with no required-versus-optional distinction.
+- Reject failed, cancelled, timed-out, action-required, pending, unknown or stale evidence. Completed skipped/neutral check runs are allowed only alongside at least one successful check or legacy status. Zero evidence and all-skipped/neutral evidence reject.
+- Latest status per context supersedes older status history. Check reruns retain App and check-suite identity so same-named checks from different providers or suites cannot mask failures.
+- Preserve contract validation, permanent PR binding, local-only no-network behavior, shared completion ownership/CAS/store safeguards, and final PR head/base/state revalidation. Only read-only APIs are used.
+- Receipts record the `reported-ci` acceptance basis and exact selected evidence. API failures and malformed/incomplete evidence reject with phase-specific diagnostics, without raw stderr or secret-bearing exceptions.
+- Unreported expected checks are undetectable. Acceptance is a completion-time snapshot, not a mergeability decision, a distributed transaction or continuous monitoring.
 
-**Non-goals:** changing GitHub billing or visibility, treating empty policy as acceptance, or disabling required CI checks.
+### Local verification and migration
+
+Canonical `scripts/run_tests.sh`, with credential-free scratch HOME and isolated per-file processes, completed all 90 Kanban-named test files: **701 passed, 0 failed, 2 skipped**. The acceptance file contains 97 passing cases, including native SQLite completion, read-only local HTTP pagination, tool dispatch, CLI parsing/completion, review ownership and the dashboard HTTP endpoint. The standalone local lifecycle probe and Ruff F checks also pass; tracked-source hashes were unchanged during each run. The worktree-local copied test environment passes `pip check`; its non-bytecode file manifest stayed unchanged through verification. This is scoped Linux verification, not the full repository suite, cross-platform certification or complete dependency-lock qualification.
+
+The unchanged-base reported-CI regression attempt is preserved separately (63 failures, 2 passes; some failures reflect new receipt fields rather than changed acceptance outcomes). Independent review then found ambiguous duplicate legacy-status IDs and malformed identifier/PR-state acceptance. Added native tests reproduced 13 unsafe acceptances before correction; the final matrix and broader suite pass after rejecting duplicate status IDs, requiring positive identifiers and checking PR-state consistency. Independent re-review found both issues addressed and no remaining actionable blocker within its bounded scope.
+
+A separate read-only collector canary against an existing public fork PR exercised actual GitHub/`gh` response shapes without a board transition. A successful bot status plus a skipped check satisfied the approved reported-CI rule; this is not proof that a build/test workflow ran, nor a private-repository billing-plan test. Existing expected-check limitations remain explicit above. No live worker completion, publication, merge, deployment or rollback drill was performed.
+
+No schema/configuration migration or automatic card recovery is introduced. Existing PR bindings, ownership guards and historical receipts remain intact. Previously held cards require a separately authorized native disposition; no live boards are changed. Rollback restores the previous collector and documentation, which reinstates policy discovery for future attempts; it does not reverse completed tasks or rewrite historical `reported-ci` receipts.
+
+**Non-goals:** billing/visibility changes, operator policy, merge/deployment, live card recovery, or changing RP-HERMES-001/RP-HERMES-002.
 
 ## RP-HERMES-002: Block recurrence and triage recovery
 
