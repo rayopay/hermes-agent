@@ -45,7 +45,7 @@ def run(argv: list[str], *, cwd: Path, timeout: int = 120) -> subprocess.Complet
     # No shell interpolation. Hooks cannot execute incidental host code during
     # preparation; this does not change native Hermes approval configuration.
     return subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout,
-                          env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                          env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"})
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
@@ -201,6 +201,81 @@ def pinned_git_env(origin: str, bundle_path: Path, inherited: dict[str, str]) ->
             "GIT_TERMINAL_PROMPT": "0"}
 
 
+def verify(operation: Path, expected_sha: str, expected_origin: str, expected_branch: str) -> dict:
+    """Read-only snapshot checks, not a deployment admission or an ownership lock.
+
+    Expectations must come from the operator's independently reviewed record.
+    The receipts are local evidence, not signatures or proof of human approval.
+    No fetch, pause, service operation, or updater execution belongs here.
+    """
+    if any(k.startswith("GIT_CONFIG") or k in {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE"
+    } for k in os.environ):
+        raise Refusal("Inherited Git overrides require explicit reconciliation")
+    sha(expected_sha)
+    if expected_origin not in (FORK, UPSTREAM) or not expected_branch:
+        raise Refusal("Expected canonical source and branch are required")
+    operation = exact_path(operation)
+    try:
+        release = load_release(operation)
+        transport = json.loads(exact_path(operation / "bundle.json").read_text())
+        if not isinstance(transport, dict):
+            raise Refusal("Malformed bundle manifest")
+        branch = "rayopay-release/" + expected_sha
+        target = exact_path(release["installed"]["path"])
+        bundle_path = exact_path(transport["bundle"])
+        if (transport["schema"] != 1 or transport["sha"] != expected_sha
+                or release["combined"]["head"] != expected_sha
+                or transport["branch"] != branch
+                or transport["prerequisite"] != release["installed"]["head"]
+                or bundle_path != operation / "release.bundle"):
+            raise Refusal("Release, bundle and independent expectation disagree")
+        if identity(target) != release["installed"]:
+            raise Refusal("Installed identity changed; prepare again")
+        if git(target, "symbolic-ref", "--short", "HEAD") != expected_branch:
+            raise Refusal("Installed branch differs from the expected baseline")
+        if git(target, "config", "--get-all", "remote.origin.url") != expected_origin:
+            raise Refusal("Persistent origin differs or has multiple URLs")
+        if git(target, "config", "--get-all", "remote.origin.fetch") != "+refs/heads/*:refs/remotes/origin/*":
+            raise Refusal("Origin fetch refspec requires explicit review")
+        digest = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+        if digest != transport["sha256"]:
+            raise Refusal("Bundle digest changed")
+        # list-heads and verify are local reads. Never fetch into the live target
+        # merely to validate prerequisites; Git bundle verify does that in place.
+        if git(target, "bundle", "list-heads", str(bundle_path)).splitlines() != [
+            expected_sha + " refs/heads/" + branch
+        ]:
+            raise Refusal("Bundle advertises unexpected refs or revision")
+        git(target, "bundle", "verify", str(bundle_path))
+        candidate = Path(release["candidate"])
+        for ancestor in (release["installed"]["head"], release["upstream_sha"], release["downstream_sha"]):
+            assert_ancestor(candidate, ancestor, expected_sha)
+        env = pinned_git_env(expected_origin, bundle_path, dict(os.environ))
+        resolved = subprocess.run(["git", "-C", str(target), "remote", "get-url", "origin"],
+                                  text=True, capture_output=True, timeout=30, env=env)
+        if resolved.returncode or resolved.stdout.strip() != str(bundle_path):
+            raise Refusal("Pinned transport did not resolve to the exact bundle")
+        if hashlib.sha256(bundle_path.read_bytes()).hexdigest() != digest:
+            raise Refusal("Bundle changed during observation")
+        if identity(target) != release["installed"]:
+            raise Refusal("Installed identity changed during observation")
+        return {"schema": 1, "status": "snapshot-verified-not-deployable",
+                "candidate_sha": expected_sha, "installed": release["installed"],
+                "expected_origin": expected_origin, "expected_branch": expected_branch,
+                "bundle_sha256": digest, "observed_at": time.time(),
+                "deployment": "not authorized", "remaining_gates": [
+                    "exact-candidate qualification and independent review",
+                    "explicit human deployment and source-transition approval",
+                    "independent supervisor, exclusive maintenance ownership and protected bundle",
+                    "verified pause ownership, fleet drain and recoverable backups",
+                    "rehearsed native source/branch transition and recovery",
+                    "native receipt, final SHA, replacement fleet health and owned resume"]}
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise Refusal("Malformed release evidence") from exc
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="command", required=True)
@@ -212,6 +287,10 @@ def main() -> int:
     p.add_argument("--operation", type=Path, required=True)
     p = subs.add_parser("status", help="Read the preparation receipt without promoting it")
     p.add_argument("--operation", type=Path, required=True)
+    p = subs.add_parser("verify", help="Read-only artifact/target snapshot; never deploys or grants approval")
+    p.add_argument("--operation", type=Path, required=True)
+    for name in ("expected-sha", "expected-origin", "expected-branch"):
+        p.add_argument("--" + name, required=True)
     args = parser.parse_args()
     try:
         if args.command == "prepare":
@@ -219,6 +298,8 @@ def main() -> int:
                              args.upstream_sha, args.downstream_sha, args.upstream_source)
         elif args.command == "bundle":
             result = bundle(exact_path(args.operation))
+        elif args.command == "verify":
+            result = verify(args.operation, args.expected_sha, args.expected_origin, args.expected_branch)
         else:
             result = json.loads(exact_path(args.operation / "release.json").read_text())
         print(json.dumps(result, indent=2))

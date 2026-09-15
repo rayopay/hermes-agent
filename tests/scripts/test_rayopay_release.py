@@ -3,13 +3,17 @@
 These verify orchestration/transport, not Hermes runtime or deployment acceptance.
 """
 import importlib.util
+import hashlib
+import json
 import os
+import sys
 from pathlib import Path
 import subprocess
 
 import pytest
 
 SPEC = importlib.util.spec_from_file_location("rayopay_release", Path(__file__).resolve().parents[2] / "scripts/rayopay_release.py")
+assert SPEC is not None and SPEC.loader is not None
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 
@@ -74,6 +78,7 @@ def test_prepare_preserves_both_histories_and_bundle_pins_real_fetch(trees, tmp_
     assert resolved == transport["bundle"]
     subprocess.run(["git", "-C", str(installed), "fetch", "origin", transport["branch"]], env=env, check=True, capture_output=True)
     assert git(installed, "rev-parse", "FETCH_HEAD") == transport["sha"]
+    assert git(installed, "rev-parse", "refs/remotes/origin/" + transport["branch"]) == transport["sha"]
     assert git(installed, "remote", "get-url", "origin") == str(source)
     assert release.identity(installed) == installed_before
     with pytest.raises(release.Refusal, match="already exists"):
@@ -127,3 +132,83 @@ def test_changed_candidate_cannot_be_bundled(trees, tmp_path):
     with pytest.raises(release.Refusal, match="identity changed"):
         release.bundle(op)
     assert not (op / "release.bundle").exists()
+
+
+def file_snapshot(root):
+    """Compare actual fixture bytes/modes, including Git index/config/refs."""
+    return {str(p.relative_to(root)): (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mode)
+            for p in root.rglob("*") if p.is_file()}
+
+
+def test_verify_cli_is_read_only_and_does_not_grant_deployment(trees, tmp_path):
+    """Exercise the public CLI, including real bundle verification without fetching."""
+    _, installed, _, _ = trees
+    git(installed, "remote", "add", "origin", release.UPSTREAM)
+    op = tmp_path / "operation"
+    prepare(trees, op)
+    transport = release.bundle(op)
+    before = file_snapshot(tmp_path)
+    result = subprocess.run([sys.executable, "-B", str(SPEC.origin), "verify", "--operation", str(op),
+                             "--expected-sha", transport["sha"], "--expected-origin", release.UPSTREAM,
+                             "--expected-branch", "main"], text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "snapshot-verified-not-deployable"
+    assert report["deployment"] == "not authorized"
+    assert report["remaining_gates"]
+    assert file_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("case", ["sha", "dirty", "head", "origin", "branch", "bundle_bytes",
+                                    "manifest_sha", "prerequisite", "extra_ref", "refspec",
+                                    "symlink", "config_env", "git_dir_env", "malformed_manifest"])
+def test_verify_refuses_drift_without_modification(trees, tmp_path, monkeypatch, case):
+    """Corruption or drift is a refusal, never a repair or an implicit source switch."""
+    _, installed, _, _ = trees
+    git(installed, "remote", "add", "origin", release.UPSTREAM)
+    op = tmp_path / "operation"
+    prepare(trees, op)
+    transport = release.bundle(op)
+    expected = transport["sha"]
+    bundle_path = Path(transport["bundle"])
+    if case == "sha":
+        expected = "0" * 40
+    elif case == "dirty":
+        (installed / "untracked.txt").write_text("preserve")
+    elif case == "head":
+        commit(installed, "advance.txt", "new version")
+    elif case == "origin":
+        git(installed, "remote", "set-url", "origin", release.FORK)
+    elif case == "branch":
+        git(installed, "switch", "-qc", "other")
+    elif case == "bundle_bytes":
+        bundle_path.chmod(0o600)
+        with bundle_path.open("ab") as stream:
+            stream.write(b"corruption")
+    elif case == "manifest_sha":
+        transport["sha"] = "0" * 40
+    elif case == "prerequisite":
+        transport["prerequisite"] = "0" * 40
+    elif case == "extra_ref":
+        candidate = op / "candidate"
+        git(candidate, "update-ref", "refs/heads/extra", transport["sha"])
+        bundle_path.chmod(0o600)
+        git(candidate, "bundle", "create", str(bundle_path), "refs/heads/" + transport["branch"],
+            "refs/heads/extra", "^" + transport["prerequisite"])
+        bundle_path.chmod(0o400)
+        transport["sha256"] = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    elif case == "refspec":
+        git(installed, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/elsewhere/*")
+    elif case == "symlink":
+        real = op / "moved.bundle"
+        bundle_path.rename(real)
+        bundle_path.symlink_to(real)
+    elif case == "config_env":
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "0")
+    elif case == "git_dir_env":
+        monkeypatch.setenv("GIT_DIR", str(installed / ".git"))
+    (op / "bundle.json").write_text(json.dumps(transport if case != "malformed_manifest" else []))
+    before = file_snapshot(tmp_path)
+    with pytest.raises(release.Refusal):
+        release.verify(op, expected, release.UPSTREAM, "main")
+    assert file_snapshot(tmp_path) == before
