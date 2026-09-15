@@ -33,9 +33,10 @@ jobs:
         with:
           python-version: '3.11.15'
 
-      - name: Prepare locked core and development dependencies
+      - name: Prepare locked test dependencies
+        # Gateway wake tests exercise Telegram/aiohttp from the messaging extra.
         run: |
-          uv sync --locked --python 3.11.15 --extra dev --no-install-project
+          uv sync --locked --python 3.11.15 --extra dev --extra messaging --no-install-project
           git diff --exit-code -- pyproject.toml uv.lock
 
       - name: Run scoped canonical tests

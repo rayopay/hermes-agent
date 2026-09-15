@@ -97,6 +97,16 @@ The probe now checks the native delegated-process predicate before importing the
 
 The new refusal regression failed before the preflight change and passed afterward. Post-review canonical verification ran the original 90-file Kanban inventory plus the new probe regression: **702 passed, 0 failed, 2 skipped across 91 files**. The authorized top-level lifecycle probe and Ruff F checks passed again; source hashes were unchanged during verification. The collector, store and native guard were not modified by this review follow-up. The original qualification limits still apply.
 
+### Fork-safe CI qualification
+
+[Rayopay Kanban CI](../../.github/workflows/rayopay-kanban-ci.yml) is a bounded Linux qualification lane for this branch, not a replacement for the full upstream CI or release pipeline. It uses a standard GitHub-hosted Ubuntu runner, Python 3.11.15 supplied by a SHA-pinned `setup-python` action, and upstream's pinned uv 0.9.28. Dependencies are installed with `--locked`, the existing `dev` and `messaging` extras, and no project installation; dependency manifests must remain unchanged. Messaging dependencies are necessary for the included gateway wake tests.
+
+The workflow discovers Kanban-named test files (including the standalone-probe regression), rejects an empty selection, runs the canonical per-file runner with two workers and no retry, and runs the lifecycle probe and affected-file Ruff F checks. Logs are retained as per-head artifacts. It has only `contents: read`, does not persist checkout credentials, and uses no repository secrets, publication steps or deployment environments.
+
+The bootstrap push trigger is restricted to this implementation branch. Manual `workflow_dispatch` supports deliberate exact-head qualification. A correction may use GitHub's `[skip ci]` push directive followed by an explicit dispatch of this workflow to avoid starting the inherited broad/specialized-runner fan-out; that is a declared scoped test run, not a claim that skipped or cancelled upstream lanes passed. No repository-wide workflow settings or merge requirements are changed. Expanding this lane to other branches or replacing inherited CI is a separate maintenance decision.
+
+The first remote attempt failed before tests because uv's pinned download catalog lacked Python 3.11.15; supplying Python separately corrected that setup issue. The next attempt exposed missing messaging dependencies (692 passes, one failure and one collection error). Those failed attempts remain evidence; subsequent run URLs, exact heads, actual counts and final review coverage are recorded in the PR rather than assumed from workflow configuration. Remote CI results do not establish full-suite or deployment qualification.
+
 ## Migration, rollback and delivery boundaries
 
 No schema/configuration migration or automatic card recovery is introduced. Existing bindings and historical receipts remain intact. Previously held cards require a separately authorized native disposition; this PR does not edit live boards.
