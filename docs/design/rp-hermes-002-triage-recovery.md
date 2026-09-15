@@ -2,6 +2,8 @@
 
 ## Status and scope
 
+Tracking PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6) (draft; implementation and verification in progress).
+
 **Behaviour approved for implementation; technical design under review.** This document formalises the decisions agreed for RP-HERMES-002. It is not evidence that implementation, tests, publication, merge, deployment or live-card recovery have completed.
 
 Develop in a dedicated branch of the maintained Hermes fork. Do not modify the installed runtime, live boards, profile permissions, product workspaces or running workers. Publication, release and live-card disposition are separate actions. Product orchestration remains with its owning PM; Hermes maintenance remains with Default.

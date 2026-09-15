@@ -40,7 +40,7 @@ Status meanings:
    - Status: **Authorized development — approved behaviour documented; technical design under review**.
    - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
    - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
-   - Implementation PR: not opened. No executable implementation or passing-test claim is implied by the design document.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), draft. Test-first implementation is starting; no feature-test pass is claimed by the design document.
    - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation
