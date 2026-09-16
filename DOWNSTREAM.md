@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** qualify and roll out RP-HERMES-001: remove the blanket PR-comment cooldown and hold only ambiguous interrupted implementation recovery for owner reconciliation. Publication, merge and local deployment are authorized, subject to the remaining technical gates; the change is not yet accepted or deployed. CI-policy discovery and triage changes remain queued separately.
+**Current scope:** qualify and roll out RP-HERMES-001: remove the blanket PR-comment cooldown and hold only ambiguous interrupted implementation recovery for owner reconciliation. Publication, merge and local deployment are authorized, subject to the remaining technical gates; the change is not yet merged or deployed. Preserve independently merged RP-HERMES-003 from [PR #5](https://github.com/rayopay/hermes-agent/pull/5), which removes required-check policy discovery while retaining reported exact-head CI acceptance. The combined release still requires qualification; triage changes remain outside this rollout.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -18,6 +18,7 @@ Status meanings:
 
 - **Proposed:** a direction and acceptance criteria, not a finalized API or working feature.
 - **Authorized development:** the behavior is approved and local implementation is active; no implementation PR is open yet.
+- **Locally verified:** implementation and scoped local verification are complete; publication, PR review, release qualification and deployment are separate.
 - **In implementation:** an implementation PR exists and work is actually active.
 - **In review:** code and verification evidence are submitted, with outstanding review identified.
 - **Merged:** accepted into the fork; not necessarily deployed.
@@ -32,11 +33,12 @@ Status meanings:
    - Implementation PR: [rayopay/hermes-agent#3](https://github.com/rayopay/hermes-agent/pull/3).
    - Implementation checkpoint: `7d6d752af0e00633178d187711846bceed57b215`, based on `d77d61287012a53fe915c11e950bbcc72a0a7630`; subsequent documentation-only commits do not change this executable checkpoint.
    - Merge / deployment: neither performed.
-2. **RP-HERMES-003 — exact-head CI acceptance without mandatory paid policy discovery**
-   - Priority: queued after RP-HERMES-001.
-   - Status: **Proposed — implementation not started**.
-   - Implementation PR: not opened.
-   - Merge / deployment: neither performed.
+2. **RP-HERMES-003 — reported exact-head CI acceptance without policy discovery**
+   - Priority: approved as a narrow, independent change.
+   - Status: **Merged — combined-release qualification and local deployment outstanding**.
+   - Implementation PR: [rayopay/hermes-agent#5](https://github.com/rayopay/hermes-agent/pull/5); branch `fix/ci-status-without-policy-discovery`.
+   - Base: `d77d61287012a53fe915c11e950bbcc72a0a7630`; implementation checkpoint: `0b3bd403443b7264ba63d274be414a8a85034ff5`.
+   - Merge: `74fa18f59f9671012788db5abf52ffa14e78d1a7`; local deployment not performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: queued after RP-HERMES-003.
    - Status: **Proposed — implementation not started**.
@@ -61,30 +63,13 @@ reorganisation does not itself require or trigger additional tests.
 
 ## RP-HERMES-003: CI acceptance and policy discovery
 
-### Observed behavior and motivation
+Native PR completion previously depended on GitHub branch-protection/rules APIs to discover required checks. On private repositories those reads can require a paid plan even when CI results are readable, preventing completion for reasons unrelated to the reported CI outcome.
 
-For an explicit PR completion contract, the native acceptance collector reads classic branch protection and the active-rules endpoint to discover required checks, then evaluates exact-head check runs and legacy statuses. Unreadable policy rejects completion.
+The approved narrow change removes policy discovery without replacing it with operator configuration. Hermes still verifies reported checks and commit statuses for the exact current PR head before completing a PR-linked task. It requires at least one success, permits completed skipped/neutral checks alongside success, and rejects blocking or unavailable evidence. PR contracts/binding, receipts and native ownership safeguards remain intact.
 
-GitHub can allow check-run reads while returning a plan-related HTTP 403 for rules on private repositories. This is a **required-policy discovery** dependency, not a general requirement to buy a plan merely to read CI. An individual account upgrade is not interchangeable with the applicable organization plan. Local-only contracts are a distinct existing mode, not a workaround for downgrading an already declared PR contract.
+The deliberate trade-off is that every reported failure counts, including optional failures, while expected checks that never appear cannot be detected. This is reported-CI acceptance—not proof that a build/test workflow ran, merge approval or deployment qualification. No schema/configuration migration or automatic live-card recovery is introduced.
 
-Baseline source: [`hermes_cli/kanban_pr_acceptance.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance.py), `collect_acceptance`, and [`hermes_cli/kanban_pr_acceptance_store.py`](https://github.com/NousResearch/hermes-agent/blob/6bc0e9e6df1be528dca42b4ae720026192896662/hermes_cli/kanban_pr_acceptance_store.py).
-
-### Proposed fix
-
-Add an explicitly selected, operator-controlled required-check policy source alongside native GitHub policy discovery. It must declare a nonempty check set scoped to the exact repository and target branch, include check-provider identity where required, and record its provenance/version in acceptance receipts. Keep the implementation at the shared completion boundary so tools, CLI, review approval, and dashboard cannot disagree.
-
-This operator policy is an explicit alternative authority, **not** a claim that unreadable GitHub rules are absent. Never switch to it automatically on a 403 or another API error. Its exact configuration interface and change-control semantics require design review.
-
-### Acceptance criteria
-
-- Explicitly selected operator policy permits verification without requiring the paid rules endpoint; the original GitHub-discovery mode remains available.
-- Required checks are nonempty, repository/base-scoped, and unavailable for workers to weaken through comments or completion metadata.
-- Missing, pending, failed, cancelled, stale, skipped, or neutral required evidence cannot satisfy completion. Optional check failures do not automatically veto valid required evidence.
-- Exact-head matching, check-App identity, pagination completeness, PR head/base revalidation, and transactional run ownership remain enforced.
-- Policy changes during collection invalidate the receipt or require a retry; policy identity and evidence remain auditable.
-- Unreadable policy, malformed configuration, and API failures reject completion with actionable diagnostics. Existing PR contracts are preserved, not changed to local-only.
-
-**Non-goals:** changing GitHub billing or visibility, treating empty policy as acceptance, or disabling required CI checks.
+**Status:** [PR #5](https://github.com/rayopay/hermes-agent/pull/5) is merged in the fork, with its scoped verification preserved; not locally deployed. Detailed decisions, rejected alternatives, exact acceptance rules, verification scope and rollback considerations live in the historical [RP-HERMES-003 design decision record](docs/decisions/RP-HERMES-003-reported-ci-acceptance.md).
 
 ## RP-HERMES-002: Block recurrence and triage recovery
 
