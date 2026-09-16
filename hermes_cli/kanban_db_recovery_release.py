@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import socket
 import time
 from pathlib import Path
+
+import psutil
 
 from hermes_cli import kanban_db_recovery as accounting
 
@@ -20,7 +21,7 @@ def settlement_scope(conn, task_id):
     """Read-only binding template, NOT a settlement receipt or absence proof."""
     from hermes_cli.kanban_db_connect import connection_db_path
     task, state, view, runs = accounting._observe(conn, task_id)
-    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    boot = Path('/proc/sys/kernel/random/boot_id').read_text(encoding="utf-8").strip()
     if not boot or not socket.gethostname():
         raise ValueError("Known local host identity required")
     return {"observed_token": view["observed_token"], "task_id": task_id,
@@ -54,12 +55,12 @@ def _settled(conn, task_id, refs):
         if type(pid) is not int or pid <= 0:
             return False
         try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            continue
-        except OSError:
+            # Only authoritative absence permits progress; live/reused PIDs
+            # (including zombies) and probe uncertainty must retain the hold.
+            if psutil.pid_exists(pid) is not False:
+                return False
+        except (psutil.Error, OSError, ValueError, TypeError):
             return False
-        return False
     return True
 
 
