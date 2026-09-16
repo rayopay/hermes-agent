@@ -305,7 +305,7 @@ def test_cli_refuses_non_object_receipts(tmp_path, command, value):
 def test_prepare_records_lock_failure_as_blocked(trees, tmp_path, lock_failure):
     import fcntl
     from contextlib import ExitStack
-    source, installed, upstream, downstream = trees
+    source, installed, downstream, upstream = trees
     lock_path = source / ".git" / "rayopay-release.lock"
     op = tmp_path / "blocked-operation"
     with ExitStack() as stack:
