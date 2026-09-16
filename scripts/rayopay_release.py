@@ -312,7 +312,9 @@ def main() -> int:
             result = verify(args.operation, args.expected_sha, args.expected_origin, args.expected_branch)
         else:
             result = json.loads(exact_path(args.operation / "release.json").read_text(encoding="utf-8"))
-            if not isinstance(result, dict):
+            if (not isinstance(result, dict) or type(result.get("schema")) is not int
+                    or result.get("schema") != 1 or result.get("status") not in (
+                        "preparing", "blocked", "prepared-not-qualified")):
                 raise Refusal("Malformed release evidence")
         print(json.dumps(result, indent=2))
         return 2 if result.get("status") == "blocked" else 0

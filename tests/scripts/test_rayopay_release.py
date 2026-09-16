@@ -301,6 +301,38 @@ def test_cli_refuses_non_object_receipts(tmp_path, command, value):
     assert file_snapshot(op) == before
 
 
+@pytest.mark.parametrize("value, expected_exit", [
+    ({}, 2),
+    ({"schema": 1}, 2),
+    ({"schema": 2, "status": "preparing"}, 2),
+    ({"schema": True, "status": "preparing"}, 2),
+    ({"schema": 1.0, "status": "preparing"}, 2),
+    ({"schema": 1, "status": []}, 2),
+    ({"schema": 1, "status": "deployed"}, 2),
+    ({"schema": 1, "status": "preparing"}, 0),
+    ({"schema": 1, "status": "blocked"}, 2),
+    ({"schema": 1, "status": "prepared-not-qualified"}, 0),
+])
+def test_status_validates_receipt_envelope_without_promoting_it(tmp_path, value, expected_exit):
+    op = tmp_path / "operation"
+    op.mkdir()
+    (op / "release.json").write_text(json.dumps(value), encoding="utf-8")
+    before = file_snapshot(op)
+    result = subprocess.run(
+        [sys.executable, "-B", str(release.__file__), "status", "--operation", str(op)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    assert result.returncode == expected_exit
+    valid = type(value.get("schema")) is int and value.get("schema") == 1 and value.get("status") in (
+        "preparing", "blocked", "prepared-not-qualified",
+    )
+    assert json.loads(result.stdout) == (value if valid else {
+        "status": "refused", "reason": "Malformed release evidence",
+    })
+    assert "Traceback" not in result.stderr
+    assert file_snapshot(op) == before
+
+
 @pytest.mark.parametrize("lock_failure", ["contended", "directory"])
 def test_prepare_records_lock_failure_as_blocked(trees, tmp_path, lock_failure):
     import fcntl
