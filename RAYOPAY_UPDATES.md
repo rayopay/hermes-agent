@@ -32,7 +32,8 @@ Supply exact full lowercase SHAs from independently inspected Git history.
 `UPSTREAM_SOURCE` is the canonical official GitHub URL (default), or a clean
 local checkout whose HEAD equals `UPSTREAM_SHA`. The maintenance origin must be
 `https://github.com/rayopay/hermes-agent.git`. The new operation directory must
-have an existing parent outside the source and installed checkouts.
+have an existing parent outside all supplied checkouts: the maintenance source,
+the installed checkout, and any local `UPSTREAM_SOURCE` checkout.
 
 Preparation fetches into the **maintenance repository only**, creates and locks
 a detached candidate worktree, and merges the pinned upstream. It preserves both

@@ -106,15 +106,17 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
     deployed = identity(installed)
     if source["common_dir"] == deployed["common_dir"]:
         raise Refusal("Preparation must not allocate metadata in the installed repository")
-    if any(operation == root or operation.is_relative_to(root) for root in (repo, installed)):
-        raise Refusal("Operation directory must be outside source and installed checkouts")
-    if not operation.parent.is_dir() or operation.exists():
-        raise Refusal("Operation must be a new directory under an existing canonical parent")
+    input_roots = [repo, installed]
     if upstream_source != UPSTREAM:
         upstream_path = exact_path(upstream_source)
         # The local installed checkout is a read-only fetch source, not a writer.
         if identity(upstream_path)["head"] != upstream_sha:
             raise Refusal("Local upstream source does not match the requested SHA")
+        input_roots.append(upstream_path)
+    if any(operation == root or operation.is_relative_to(root) for root in input_roots):
+        raise Refusal("Operation directory must be outside all supplied checkouts")
+    if not operation.parent.is_dir() or operation.exists():
+        raise Refusal("Operation must be a new directory under an existing canonical parent")
     if git(repo, "remote", "get-url", "origin") != FORK:
         raise Refusal("Preparation checkout must belong to the Rayopay fork")
     git(repo, "cat-file", "-e", downstream_sha + "^{commit}")
@@ -164,6 +166,8 @@ def load_release(operation: Path) -> dict:
         raise Refusal("Malformed release evidence")
     if result.get("schema") != 1 or result.get("status") != "prepared-not-qualified":
         raise Refusal("A successfully prepared candidate is required")
+    if not isinstance(result.get("candidate"), str) or not isinstance(result.get("combined"), dict):
+        raise Refusal("Malformed release evidence")
     candidate = exact_path(result["candidate"])
     if candidate != operation / "candidate" or identity(candidate) != result["combined"]:
         raise Refusal("Candidate identity changed; prepare and review again")

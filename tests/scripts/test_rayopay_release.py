@@ -361,3 +361,47 @@ def test_prepare_records_lock_failure_as_blocked(trees, tmp_path, lock_failure):
         assert receipt["reason"] == ("BlockingIOError" if lock_failure == "contended" else "IsADirectoryError")
         assert not (op / "candidate").exists()
         assert file_snapshot(installed) == before
+
+
+@pytest.mark.parametrize("location", ["source", "installed", "upstream"])
+def test_prepare_cli_preserves_every_supplied_checkout(trees, tmp_path, location):
+    """Preparation refuses destinations inside any input before writing anything."""
+    source, installed, downstream, upstream = trees
+    official = tmp_path / "official"
+    subprocess.run(["git", "clone", "-q", str(installed), str(official)], check=True)
+    op = {"source": source, "installed": installed, "upstream": official}[location] / "operation"
+    before = file_snapshot(tmp_path)
+    result = subprocess.run(
+        [sys.executable, "-B", str(release.__file__), "prepare", "--repo", str(source),
+         "--installed", str(installed), "--operation", str(op), "--upstream-sha", upstream,
+         "--downstream-sha", downstream, "--upstream-source", str(official)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    assert file_snapshot(tmp_path) == before
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["status"] == "refused"
+    assert "outside" in json.loads(result.stdout)["reason"]
+    assert not op.exists()
+
+
+@pytest.mark.parametrize("field", ["candidate", "combined"])
+@pytest.mark.parametrize("damage", ["missing", "null", "wrong_type"])
+def test_bundle_cli_refuses_incomplete_candidate_evidence(trees, tmp_path, field, damage):
+    """Malformed prepared receipts are read-only refusals, never tracebacks."""
+    op = tmp_path / "operation"
+    receipt = prepare(trees, op)
+    if damage == "missing":
+        del receipt[field]
+    else:
+        receipt[field] = None if damage == "null" else 42
+    (op / "release.json").write_text(json.dumps(receipt), encoding="utf-8")
+    before = file_snapshot(tmp_path)
+    result = subprocess.run(
+        [sys.executable, "-B", str(release.__file__), "bundle", "--operation", str(op)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    assert file_snapshot(tmp_path) == before
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["status"] == "refused"
+    assert "Traceback" not in result.stderr
+    assert not (op / "release.bundle").exists()
