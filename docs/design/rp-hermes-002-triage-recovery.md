@@ -183,6 +183,16 @@ All nine checkpoint source/test/fixture hashes were stable during final verifica
 
 No full-suite, actual tool/CLI recovery, HTTP dashboard recovery, live worker/process-tree settlement, external runtime lease, no-Ready triage finalization, combined-downstream integration, merge, deployment or live-card recovery proof is claimed. These are remaining work, not waived acceptance criteria. Mixed old/new writers remain unsupported; eventual deployment/rollback must drain writers and pair compatible state/code backups. This increment must not be deployed as the complete solution.
 
+## Classification tool/CLI increment: verified evidence
+
+Base: `417a16682d965f67e85595a95848c376376edd46`. Existing `kanban_show` and CLI show expose native recovery state and the observation token. Existing `kanban_unblock` accepts an optional `recovery` object with `action: classify`; CLI `unblock --recovery-json` accepts the same payload for exactly one task, without a pre-operation comment. The shared adapter accepts only native classification fields, not caller-supplied authority. Unsupported actions, explicit null, malformed data, stale observations and worker/delegated mutation attempts fail closed without falling through to ordinary unblock.
+
+Classification responses explicitly say `classified` and `released: false`, with observed native task status. Ordinary unblock with the recovery argument omitted remains compatible. A classification can correct recurrence attribution, but does not resume the card, replenish a resolution cycle or start a worker. Read-only inspection remains available to worker/delegated contexts. Observation fields are not a cross-field concurrent snapshot or a durable promise that status cannot change afterward.
+
+Real registered tool handlers (including framework kwargs), actual CLI parser/command and disposable native SQLite boards were exercised. Final canonical results: **139 passes across 14 native/surface files** and **51 passes across five affected tool/CLI files**, both exit 0. The surface addition contains six parametrized cases with success/refusal loops; four preimplementation failures were retained, including recovery being ignored and conventional unblock incorrectly occurring before the fix. Refusals compare complete initialized-board dumps. Success controls exercise blocked/triage A-to-B-to-A classification, preserved histories and truthful non-release. Independent specification and quality reviews approved this bounded slice.
+
+No dependencies were installed; non-bytecode package-file manifests remained unchanged. Full model-provider schema normalization, external OS CLI invocation, live-worker concurrency and full repository suite are not claimed. This does not implement retry, resolved-resume, process/runtime settlement or no-Ready finalization. CodeRabbit completed review of the preceding native increment at `417a16682d965f67e85595a95848c376376edd46` with no actionable code findings and a docstring-coverage warning; that is not review coverage of this later surface increment. GitHub reported base-branch conflicts at publication preparation; reconciliation and renewed integration verification remain required before merge.
+
 ## Technical questions remaining for recovery integration
 
 These are implementation details, not additional user policy decisions:

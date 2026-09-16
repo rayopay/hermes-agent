@@ -510,10 +510,27 @@ KANBAN_UNBLOCK_SCHEMA = _schema(
         "Unblock a Kanban task. It moves to ready when all parents are done, "
         "or todo while any parent remains open. Orchestrator-only — only "
         "profiles with the kanban toolset can unblock routed work; "
-        "dispatcher-spawned task workers never see this tool."
+        "dispatcher-spawned task workers never see this tool. With recovery.action=classify, "
+        "audit an exact blocker report instead: status stays held; nothing is released or resumed."
     ),
     {
-        "task_id": _prop("string", "Blocked task id to move to ready or parent-gated todo."),
+        "task_id": _prop("string", "Target task id; classification accepts held blocked/triage tasks."),
+        "recovery": {
+            "type": "object",
+            "description": "Optional audited classification only. Omit for conventional unblock. "
+                           "Use the exact observation and report from kanban_show.recovery.",
+            "properties": {
+                "action": {"type": "string", "enum": ["classify"]},
+                "observed_token": _prop("string", "Exact observed_token from show."),
+                "block_event_id": _prop("integer", "Exact active_event_id from show."),
+                "existing_blocker_id": _prop("string", "Known identity to reattribute to; omit to create a distinct identity."),
+                "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 20,
+                                  "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+            },
+            "required": ["action", "observed_token", "block_event_id", "rationale", "evidence_refs"],
+            "additionalProperties": False,
+        },
     },
     ["task_id"],
 )

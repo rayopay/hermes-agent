@@ -37,10 +37,10 @@ Status meanings:
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: third downstream change; developed independently of the open RP-HERMES-001/003 changes, with combined qualification required before release.
-   - Status: **In implementation — native identity/classification increment tested and independently reviewed; orchestrator recovery outstanding**.
+   - Status: **In implementation — native identity/classification and agent-tool/CLI classification surfaces tested and independently reviewed; safe release/resolution outstanding**.
    - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
    - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
-   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest bounded native suite: **133 passed across 13 files**, including the earlier 61-test suite. Completion/reopen and projection-corruption defects were causally reproduced, corrected and independently re-reviewed; exact evidence and remaining limits are in the design document. These are overlapping totals, not disjoint test sets.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest bounded native/surface suite: **139 passed across 14 files**, plus **51 passed across five affected tool/CLI files**. Completion/reopen and projection-corruption defects were causally reproduced, corrected and independently re-reviewed; exact evidence and remaining limits are in the design document. These suites include earlier cases; totals are not cumulative feature coverage.
    - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation
