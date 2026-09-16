@@ -221,6 +221,18 @@ Final corrected union: **353 passed, zero failed across 26 distinct files**, can
 
 Provider-normalized dispatch, an installed OS executable, live agent inference and actual external-runtime settlement are not demonstrated by handler/parser tests. Optional test improvements remain: omit the autonomous optional instruction field instead of null, and isolate directed-instruction refusal with otherwise valid settlement evidence. No-Ready finalization, base reconciliation, combined downstream and final integration qualification remain outstanding. No fleet or live-card state changed.
 
+## Native direct-triage finalization increment: verified evidence
+
+Base: `27befd487d0a78b61bd3da2a86d93afcd6fd818f`. The native finalization API supports tracked, settled triage with an already-bound exact GitHub PR completion contract. It reuses extracted native completion preparation, transactional consumption and postcommit phases, preserving ordinary completion's public signature, status policy and ordering. The real PR acceptance engine evaluates configured required checks, App identity, current head and final PR identity; a PR URL, historical completion, recovery reference or settlement assertion alone is not acceptance.
+
+Strict actual-connection dispatch exclusion surrounds collection, consumption and postcommit. The consuming transaction revalidates actor, full task/parent/run/event/accounting observation, exact contract and scoped settlement before acceptance and recovery attribution. The target moves directly from triage to done without Ready/Review/Todo cycling, claims, worker launch or execution replay. Completion and accounting closure remain adjacent and atomic with the receipt and attribution. Ordinary postcommit operations retain their ordering; a failure after commit does not undo completion or authorize replay. Remote observations remain non-atomic with SQLite, and owner settlement attestation is not machinewide process-absence proof.
+
+This is deliberately a native-only contract subset. Absent/local-only/repository-only contracts, legacy untracked accounting and concrete scratch-workspace obligations remain held. It accepts no new completion summary, metadata or created-card inputs. Finalization tool/CLI routing remains outstanding; these constraints are not a generic acceptance framework or authorization to weaken existing gates.
+
+Qualification: **373 passed, zero failed across 28 distinct files**, canonical two-worker/no-retry runner. All prior 26 files and 353 passes are retained, with the native PR acceptance suite and 18 finalization cases added. Tests exercise genuine disposable native boards and the real acceptance engine with mocked GitHub transport, not live GitHub acceptance. They verify direct completion, no replay, unchanged prior runs, denial dump equality, competing contract/parent/event mutations, genuine SQL-trigger rollback and a postcommit hook outside the transaction. The initial red checkpoint was 16 interface-absence failures (runner exit 1); the capture wrapper's exit 0 was not a test pass. Source manifests and 85 package metadata entries were stable. Independent specification and quality reviews approved this bounded increment.
+
+Nonblocking coverage opportunities include exact attribution payload assertions, postcommit failure controls and additional refusal/lock/expiry permutations. Finalization surfaces, base reconciliation, combined downstream and final integration qualification remain outstanding. No merge, deployment or live-card mutation has occurred.
+
 ## Technical questions remaining for recovery integration
 
 These are implementation details, not additional user policy decisions:
