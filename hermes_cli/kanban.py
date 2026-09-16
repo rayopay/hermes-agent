@@ -480,8 +480,9 @@ def _cmd_show(args: argparse.Namespace) -> int:
         task = kb.get_task(conn, args.task_id)
         if not task:
             return _err(f"no such task: {args.task_id}")
-        from hermes_cli.kanban_db_recovery import get_recovery_state
-        recovery = get_recovery_state(conn, args.task_id)
+        from hermes_cli.kanban_recovery import recovery_inspection
+        inspection = recovery_inspection(conn, args.task_id)
+        recovery = inspection["recovery"]
         comments = kb.list_comments(conn, args.task_id)
         events = kb.list_events(conn, args.task_id)
         parents = kb.parent_ids(conn, args.task_id)
@@ -495,7 +496,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     if want_json:
         _print_json({
             "task": _task_to_dict(task), "latest_summary": latest_summary, "parents": parents, "children": children,
-            "recovery": recovery,
+            **inspection,
             "comments": [_obj_dict(c, ("author", "body", "created_at")) for c in comments],
             "events": [_obj_dict(e, ("kind", "payload", "created_at", "run_id")) for e in events],
             "runs": [_obj_dict(r, _SHOW_RUN_FIELDS) for r in runs],
@@ -509,6 +510,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
     field("status", task.status)
     from hermes_cli.kanban_recovery import recovery_summary
     field("recovery", recovery_summary(recovery))
+    from hermes_cli.kanban_recovery import settlement_summary
+    field("settlement_scope", settlement_summary(inspection["settlement_scope"]))
     field("assignee", task.assignee or "-")
     if task.tenant:
         field("tenant", task.tenant)
@@ -954,11 +957,11 @@ def _cmd_unblock(args: argparse.Namespace) -> int:
         if len(ids) != 1:
             return _err("recovery requires exactly one task", 2)
         if getattr(args, "reason", None) is not None:
-            return _err("use recovery rationale, not --reason; classification adds no precomment", 2)
-        from hermes_cli.kanban_recovery import classify_recovery
+            return _err("use recovery rationale, not --reason; recovery adds no precomment", 2)
+        from hermes_cli.kanban_recovery import apply_recovery
         recovery = json.loads(recovery_json)
         with kbc.connect_closing() as conn:
-            result = classify_recovery(conn, ids[0], recovery)
+            result = apply_recovery(conn, ids[0], recovery)
         _print_json(result)
         return 0 if result["ok"] else 1
     reason = _stripped_or_none(getattr(args, "reason", None))

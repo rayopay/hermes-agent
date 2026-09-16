@@ -307,9 +307,9 @@ _SPECS = [
         _bulk_ids("schedule"),
     ], help="Park one or more tasks in Scheduled (waiting on time, not human input)"),
     _cmd("unblock", [
-        _arg("--recovery-json", help="Structured recovery object (action=classify only). Exactly one task; "
-             "requires observed_token, block_event_id, rationale, evidence_refs; optional existing_blocker_id. "
-             "Audits classification without releasing the hold. Cannot combine with --reason."),
+        _arg("--recovery-json", help="Structured recovery object (action=classify|retry|resolved_resume). Release requires blocker_id, initiation_mode, settlement_refs; user_directed also requires instruction_ref. Show --json supplies a read-only settlement_scope.template: owner must assess it before adding assertion=settled and reference. Exactly one task; "
+             "requires observed_token, block_event_id, rationale, evidence_refs; classify alone accepts existing_blocker_id. "
+             "Classification stays held; release returns actual scheduling status, never launches. Cannot combine with --reason."),
         _reason("Optional reason/note — recorded as a comment before unblocking. Quote multi-word reasons."),
         _TASK_IDS,
     ], help="Return blocked/scheduled tasks to ready, or todo while parents remain open"),

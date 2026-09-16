@@ -514,12 +514,12 @@ def inject_new_comments_from_env(agent: Any) -> bool:
 @_kanban_handler("kanban_show")
 def _handle_show(args: dict, **kw) -> str:
     """Full task state: row, parents, children, comments, runs, last 50 events."""
-    from hermes_cli.kanban_db_recovery import get_recovery_state
+    from hermes_cli.kanban_recovery import recovery_inspection
     tid = _require_task_id(args)
     with _board(args.get("board")) as (kb, conn):
         task = _existing_task(kb, conn, tid)
         return json.dumps({
-            "recovery": get_recovery_state(conn, tid),
+            **recovery_inspection(conn, tid),
             "task": _fields(task, _TASK_FIELDS),
             "parents": kb.parent_ids(conn, tid),
             "children": kb.child_ids(conn, tid),
@@ -987,8 +987,8 @@ def _handle_unblock(args: dict, **kw) -> str:
     _enforce_worker_task_ownership(tid)
     with _board(args.get("board")) as (kb, conn):
         if "recovery" in args:
-            from hermes_cli.kanban_recovery import classify_recovery
-            return json.dumps(classify_recovery(conn, tid, args["recovery"]))
+            from hermes_cli.kanban_recovery import apply_recovery
+            return json.dumps(apply_recovery(conn, tid, args["recovery"]))
         _check(kb.unblock_task(conn, tid), f"could not unblock {tid} (not blocked or unknown)")
         return _ok(task_id=tid, **_fields(kb.get_task(conn, tid), ("status",)))
 

@@ -511,19 +511,47 @@ KANBAN_UNBLOCK_SCHEMA = _schema(
         "or todo while any parent remains open. Orchestrator-only — only "
         "profiles with the kanban toolset can unblock routed work; "
         "dispatcher-spawned task workers never see this tool. With recovery.action=classify, "
-        "audit an exact blocker report instead: status stays held; nothing is released or resumed."
+        "audit an exact blocker report without releasing it. retry/resolved_resume invoke native "
+        "owner recovery; returned status/eligible describe scheduling, never a worker launch."
     ),
     {
         "task_id": _prop("string", "Target task id; classification accepts held blocked/triage tasks."),
         "recovery": {
             "type": "object",
-            "description": "Optional audited classification only. Omit for conventional unblock. "
-                           "Use the exact observation and report from kanban_show.recovery.",
+            "description": "Optional audited classify/retry/resolved_resume. Omit for conventional unblock. "
+                           "Use the exact observation from kanban_show.recovery. Release requires blocker_id, "
+                           "initiation_mode and settlement_refs; user_directed requires instruction_ref. "
+                           "OWNER must assess every settlement_scope.template scope before adding assertion "
+                           "and reference. The template is not evidence or permission.",
             "properties": {
-                "action": {"type": "string", "enum": ["classify"]},
+                "action": {"type": "string", "enum": ["classify", "retry", "resolved_resume"]},
                 "observed_token": _prop("string", "Exact observed_token from show."),
                 "block_event_id": _prop("integer", "Exact active_event_id from show."),
-                "existing_blocker_id": _prop("string", "Known identity to reattribute to; omit to create a distinct identity."),
+                "existing_blocker_id": _prop("string", "Classify only: known identity to reattribute to; omit for a distinct identity."),
+                "blocker_id": _prop("string", "Release only: exact active_blocker_id from show."),
+                "initiation_mode": {"type": "string", "enum": ["user_directed", "autonomous"]},
+                "instruction_ref": _prop("string", "Required for user_directed release; instruction reference, not authority."),
+                "settlement_refs": {
+                    "type": "array", "minItems": 1, "maxItems": 1,
+                    "description": "Release only: exact fresh template plus explicit OWNER assessment. Native checks cannot prove detached/external/workspace settlement.",
+                    "items": {
+                        "type": "object", "additionalProperties": False,
+                        "properties": {
+                            "observed_token": {"type": "string"}, "task_id": {"type": "string"},
+                            "block_event_id": {"type": "integer"}, "blocker_id": {"type": "string"},
+                            "board_path": {"type": "string"}, "host": {"type": "string"},
+                            "boot_id": {"type": "string"},
+                            "run_ids": {"type": "array", "items": {"type": "integer"}},
+                            "scopes": {"type": "array", "items": {"type": "string"}},
+                            "observed_at": {"type": "integer", "description": "Exact template time; valid for 300 seconds."},
+                            "assertion": {"type": "string", "enum": ["settled"]},
+                            "reference": {"type": "string", "minLength": 1, "maxLength": 1000},
+                        },
+                        "required": ["observed_token", "task_id", "block_event_id", "blocker_id",
+                                     "board_path", "host", "boot_id", "run_ids", "scopes",
+                                     "observed_at", "assertion", "reference"],
+                    },
+                },
                 "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
                 "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 20,
                                   "items": {"type": "string", "minLength": 1, "maxLength": 1000}},

@@ -211,6 +211,16 @@ Causal failures for fresh-epoch recovery, task-wide veto, same-cause legacy enro
 
 This native increment still does not expose release through agent-tool/CLI recovery actions, implement no-Ready triage finalization, demonstrate external runtime settlement, qualify the full repository, resolve base-branch conflicts, or authorize merge/deployment/live-card recovery. Those remain required work. No current fleet state has been changed.
 
+## Agent-tool/CLI release increment: verified evidence
+
+Base: `0b971558618b4257ef03386d158540189f65c842`. Existing `kanban_unblock` and CLI `unblock --recovery-json` now forward validated `retry` and `resolved_resume` requests to the reviewed native operation; classification and omitted-recovery conventional unblock remain compatible. Per-action field whitelists reject malformed/unknown requests without fallthrough. Native actor, settlement, locking, evidence, cycle and phase checks are unchanged. Responses preserve native released/eligible/held/status fields and never imply a worker was launched.
+
+Tool and CLI inspection expose unchanged native accounting plus a `settlement_scope` wrapper. The accounting/token and template share a read snapshot; other displayed task fields remain observations. Templates carry exact binding fields but no settlement assertion or evidence reference. The explicit `owner_assessment_required` guidance distinguishes local/detached/external/workspace obligations from native PID checks. Missing host identity makes the template unavailable without breaking classification or read-only show. A template is neither evidence nor permission.
+
+Final corrected union: **353 passed, zero failed across 26 distinct files**, canonical two-worker/no-retry runner. Ten new surface cases exercise actual registered handlers with framework kwargs and parsed CLI commands against real disposable boards, including both initiation modes, exhausted retry refusal, resolved triage recovery followed by an actual native claim/new cycle, same-identity legacy recovery, authority/stale/scope refusals and parent-held Todo responses. The initial 351-pass/25-file run omitted one inherited file; its receipt is retained, and only the corrected complete union qualifies this checkpoint. All seven candidate hashes and 85 distribution metadata entries were stable; independent specification and quality reviews approved this bounded integration.
+
+Provider-normalized dispatch, an installed OS executable, live agent inference and actual external-runtime settlement are not demonstrated by handler/parser tests. Optional test improvements remain: omit the autonomous optional instruction field instead of null, and isolate directed-instruction refusal with otherwise valid settlement evidence. No-Ready finalization, base reconciliation, combined downstream and final integration qualification remain outstanding. No fleet or live-card state changed.
+
 ## Technical questions remaining for recovery integration
 
 These are implementation details, not additional user policy decisions:

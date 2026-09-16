@@ -95,7 +95,7 @@ def test_classification_is_audited_not_release(board, capsys, surface, held):
             schema = registry.get_schema("kanban_unblock")["parameters"]
             assert "recovery" not in schema["required"]
             shape = schema["properties"]["recovery"]
-            assert shape["properties"]["action"]["enum"] == [payload["action"]]
+            assert payload["action"] in shape["properties"]["action"]["enum"]
             assert set(shape["required"]) <= payload.keys() <= shape["properties"].keys()
             result = tool("kanban_unblock", task_id=tid, recovery=payload)
         else:
