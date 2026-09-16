@@ -39,7 +39,7 @@ def request(shown, mode="autonomous", action="resolved_resume"):
                 block_event_id=view["active_event_id"], blocker_id=view["active_blocker_id"],
                 rationale="Disposable test owner assessed all settlement scopes",
                 evidence_refs=["test:synthetic-repair"], initiation_mode=mode,
-                instruction_ref="test:directed-instruction" if mode == "user_directed" else None,
+                **({"instruction_ref": "test:directed-instruction"} if mode == "user_directed" else {}),
                 settlement_refs=[{**template, "assertion": "settled", "reference": "test:synthetic-assessment"}])
 
 
@@ -126,7 +126,10 @@ def test_scope_staleness_authority_and_parent_hold(board, capsys, monkeypatch, s
     bad = copy.deepcopy(payload)
     bad["settlement_refs"] = [show(capsys, surface, tid)["settlement_scope"]["template"]]
     before = list(board.iterdump())
-    assert not release(capsys, surface, tid, bad)["ok"]
+    # Missing owner assessment fields now fail at the shared transport validator.
+    denied = release(capsys, surface, tid, bad)
+    assert not denied.get("ok")
+    assert "invalid settlement reference fields" in denied["error"]
     assert list(board.iterdump()) == before
     for marker in ("HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID", "HERMES_DELEGATED_CHILD_CONTEXT"):
         with monkeypatch.context() as context:

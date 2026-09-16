@@ -64,7 +64,7 @@ def finalize_task(conn, task_id, *, observed_token, block_event_id, blocker_id,
                   instruction_ref=None):
     """Finish existing accepted PR work, without execution or status cycling.
 
-    Native-only entrypoint: CLI/tool routing is intentionally not exposed yet.
+    CLI/tool recovery adapters route explicit finalize requests here.
     Postcommit failures propagate after durable completion, as in complete_task.
     """
     from hermes_cli import kanban_db as kb, kanban_db_connect as kbc

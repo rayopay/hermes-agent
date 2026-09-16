@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** RP-HERMES-002 incremental implementation and isolated validation. Reviewed increments implement blocker identity/classification, native and agent-tool/CLI retry/resolved-resume, scoped owner-attested settlement, dispatch exclusion, phase/history safeguards and bounded native direct-triage finalization. Finalization tool/CLI wiring and final integration qualification remain outstanding. This branch is not merge/deployment-ready. Other change entries below retain their groundwork baseline; their independent implementation is tracked in PRs #3 and #5, not included in this branch.
+**Current scope:** RP-HERMES-002 incremental implementation and isolated validation. Reviewed increments implement blocker identity/classification, native and agent-tool/CLI retry/resolved-resume and bounded direct-triage finalization, scoped owner-attested settlement, dispatch exclusion and phase/history safeguards. Base reconciliation and final integration qualification remain outstanding. This branch is not merge/deployment-ready. Other change entries below retain their groundwork baseline; their independent implementation is tracked in PRs #3 and #5, not included in this branch.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -37,10 +37,10 @@ Status meanings:
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: third downstream change; developed independently of the open RP-HERMES-001/003 changes, with combined qualification required before release.
-   - Status: **In implementation — recovery surfaces and bounded native no-Ready finalization tested and independently reviewed; finalization tool/CLI wiring and final integration outstanding**.
+   - Status: **In implementation — bounded recovery and no-Ready finalization tool/CLI surfaces tested and independently reviewed; base reconciliation and final integration outstanding**.
    - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
    - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
-   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest deduplicated bounded qualification: **373 passed across 28 files**, including prior native/surface, affected tool/CLI, dispatch and dashboard regressions, native PR acceptance and 18 finalization cases. Independent specification and quality reviews approved bounded native direct-triage finalization and shared completion extraction. Exact evidence and remaining limits are in the design document; totals are not cumulative feature coverage.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest deduplicated bounded qualification: **413 passed across 29 files**, including all prior native/surface, affected tool/CLI, dispatch, dashboard and PR acceptance regressions, plus 40 finalization-surface cases. Independent specification and quality reviews approved finalization integration and its return-safety hardening. Exact evidence and remaining limits are in the design document; totals are not cumulative feature coverage.
    - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation

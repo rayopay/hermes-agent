@@ -233,6 +233,16 @@ Qualification: **373 passed, zero failed across 28 distinct files**, canonical t
 
 Nonblocking coverage opportunities include exact attribution payload assertions, postcommit failure controls and additional refusal/lock/expiry permutations. Finalization surfaces, base reconciliation, combined downstream and final integration qualification remain outstanding. No merge, deployment or live-card mutation has occurred.
 
+## Finalization tool/CLI increment: verified evidence
+
+Base: `c90b6d3fffb17106c31b498197f235b24964e71b`. Existing `kanban_unblock` and parsed CLI `unblock --recovery-json` now route explicit `action=finalize` through the shared adapter to the reviewed native operation. Per-action whitelists and schema-aligned transport checks reject malformed/unknown fields and explicit null strings before native mutation. Omitted recovery retains conventional unblock; classification, retry and resolved-resume remain supported. Finalization preserves the exact-PR/tracked/settled/no-scratch contract subset and does not weaken acceptance or authority.
+
+Success reports native `completed:true`, `held:false`, `status:done`, not dispatch eligibility or a launched worker. Native refusal remains refusal. Exceptions retain their original type/message and cause; best-effort observed committed status is explicitly not rollback or proof that this request succeeded. A failed diagnostic read cannot replace the original failure. An authoritative native finalization result is returned without a redundant status lookup; held results lacking status retain the existing fallback. Native executable behavior is unchanged in this slice, including the documentation-only correction to its exposure description.
+
+Final qualification: **413 passed, zero failed across 29 distinct files**, canonical two-worker/no-retry runner, child exit 0. All prior 373 tests/28 files are retained, with 40 finalization-surface cases. Genuine registered handlers and parsed CLI commands exercise both initiation modes, exact attribution, acceptance refusals, real competing contract changes, no status cycling/replay and durable completion after early postcommit failure. Five hardening cases prove the redundant read is absent and original exceptions survive failed diagnostic observation; their causal red was 38 passes/two failures, followed by 40 focused passes. Earlier interface-red and a fixture-shape failure are retained separately, not erased by the final green result. All six candidate hashes and 85 package metadata entries were stable; specification and quality reviews approved both integration and hardening.
+
+These are disposable-board tests with real native acceptance logic and controlled GitHub transport, not live GitHub, provider-normalized or installed-executable acceptance. Additional legacy/scratch/lock and absent/conflicting-observation surface permutations remain unexecuted. Base conflict reconciliation, combined downstream compatibility and final integration qualification remain outstanding. Nothing has been merged, deployed or applied to live cards.
+
 ## Technical questions remaining for recovery integration
 
 These are implementation details, not additional user policy decisions:
