@@ -2008,7 +2008,7 @@ def _resume_status_from_events(conn: sqlite3.Connection, task_id: str) -> str:
         "WHERE task_id = ? AND kind IN ("
         "'blocked', 'block_loop_detected', 'dependency_wait', 'gave_up', "
         "'unblocked', 'changes_requested', 'review_reopened', 'status', 'reclaimed', "
-        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited'"
+        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited', 'blocker_resolved', 'blocker_retried'"
         ") ORDER BY id DESC LIMIT 1", (task_id,),
     ).fetchone()
     payload = _json_dict(_row_get(row, "payload"))
@@ -2040,6 +2040,8 @@ def recompute_ready(conn: sqlite3.Connection, failure_limit: int = None) -> int:
         ).fetchall()
         for row in todo_rows:
             task_id = row["id"]
+            if recovery_hold(conn, task_id):
+                continue
             cur_status = row["status"]
             if cur_status == "blocked" and _has_sticky_block(conn, task_id):
                 # Explicit human-intervention block; only ``unblock_task`` may exit it.
@@ -2094,12 +2096,17 @@ def _parents_satisfied(conn: sqlite3.Connection, task_id: str) -> bool:
     ).fetchone() is None
 
 
+from hermes_cli.kanban_db_recovery import recovery_hold
+
+
 def _claim_and_open_run(
     conn: sqlite3.Connection, task_id: str, source_status: str, lock: str, expires: int, now: int,
     *, event_extra: Optional[dict] = None,
 ) -> Optional[int]:
     """CAS ``source_status -> running``, open a run row, emit ``claimed``; None
     when the CAS lost. Caller holds the txn."""
+    if recovery_hold(conn, task_id):
+        return None
     cur = conn.execute(
         f"""
         UPDATE tasks
@@ -2154,6 +2161,9 @@ def claim_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        # Refuse before dependency writes or dangling-run cleanup.
+        if recovery_hold(conn, task_id):
+            return None
         # Single enforcement point: never ready -> running with an undone
         # parent, whichever writer set 'ready'. Demote to 'todo';
         # recompute_ready re-promotes when the parents finish.
@@ -2187,6 +2197,8 @@ def claim_review_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return None
         if not _parents_satisfied(conn, task_id):
             demoted = conn.execute(
                 "UPDATE tasks SET status = 'todo' "
@@ -2982,7 +2994,8 @@ def block_task(
             conn, task_id, outcome="blocked", status="blocked", summary=reason, synthesize=bool(reason),
         )
         payload["blocker_id"] = recovery["active_blocker_id"]
-        payload["blocker_cycle"] = 1 if recovery["active_blocker_id"] else None
+        payload["blocker_cycle"] = (recovery["blockers"][recovery["active_blocker_id"]]["cycle"]
+                                    if recovery["active_blocker_id"] else None)
         if not recovery["reports"]:
             # Bind inherited native budget even when this report is uncounted.
             payload["blocker_seed"] = int(cur_row["block_recurrences"] or 0)
@@ -3278,10 +3291,14 @@ def promote_task(
             f"`hermes kanban unlink <parent_id> {task_id}`)"
         )
 
+    if recovery_hold(conn, task_id):
+        return False, "unresolved blocker budget exhausted"
     if dry_run:
         return True, None
 
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False, "unresolved blocker budget exhausted"
         upd = conn.execute(
             "UPDATE tasks SET status = 'ready' "
             "WHERE id = ? AND status IN ('todo', 'blocked')", (task_id,),
@@ -3328,6 +3345,8 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     when that is where it left off), closing any leaked run first."""
     now = int(time.time())
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         resume_status = (
             _resume_status_from_events(conn, task_id)
             if _task_status(conn, task_id) == "blocked"
@@ -3374,6 +3393,8 @@ def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
     not a block; only :func:`complete_task` clears them)."""
     now = int(time.time())
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         _reclaim_dangling_run(
             conn, task_id, statuses=("review",), now=now,
             note="invariant recovery on review reopen",
@@ -3510,6 +3531,8 @@ def specify_triage_task(
         raise ValueError("title cannot be blank")
     assignee = _canonical_assignee(assignee)
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         existing = conn.execute(
             "SELECT title, body, assignee FROM tasks WHERE id = ? AND status = 'triage'",
             (task_id,),
@@ -3958,7 +3981,7 @@ def gc_events(conn: sqlite3.Connection, *, older_than_seconds: int = 30 * 24 * 3
     cutoff = int(time.time()) - int(older_than_seconds)
     with write_txn(conn):
         cur = conn.execute(
-            "DELETE FROM task_events WHERE created_at < ? AND kind NOT IN ('decomposed', 'blocked', 'block_loop_detected', 'dependency_wait', 'blocker_classified', 'blocker_cycle_closed') "
+            "DELETE FROM task_events WHERE created_at < ? AND kind NOT IN ('decomposed', 'blocked', 'block_loop_detected', 'dependency_wait', 'blocker_classified', 'blocker_legacy_enrolled', 'blocker_cycle_closed', 'blocker_resolved', 'blocker_retried', 'spawned') "
             "AND NOT (kind='completed' AND task_id IN (SELECT task_id FROM task_recovery)) AND task_id IN "
             "(SELECT id FROM tasks WHERE status IN ('done', 'archived'))", (cutoff,),
         )

@@ -22,7 +22,8 @@ def classify(c, t, v):
     return classify_blocker(c, t, observed_token=v["observed_token"], block_event_id=v["active_event_id"], rationale="checked", evidence_refs=["fixture:proof"])
 
 @pytest.mark.parametrize("damage", ["pointer", "missing_report", "foreign_report", "missing_correction", "foreign_correction", "deleted_projection", "original_payload", "correction_chain"])
-def test_corrupt_audit_refuses_reads_classification_and_reports(board, damage):
+@pytest.mark.parametrize("phase", ["held", "running"])
+def test_corrupt_audit_refuses_reads_classification_and_reports(board, damage, phase):
     t = kb.create_task(board, title="target", assignee="worker")
     other = kb.create_task(board, title="other", assignee="worker")
     block(board, t)
@@ -34,6 +35,9 @@ def test_corrupt_audit_refuses_reads_classification_and_reports(board, damage):
     row = board.execute("SELECT state_json FROM task_recovery WHERE task_id=?", (t,)).fetchone()
     s = json.loads(row[0])
     report, correction = v["active_event_id"], result["correction_event_id"]
+    if phase == "running":
+        assert kb.unblock_task(board, t)
+        claim = kb.claim_task(board, t, claimer="worker")
     if damage == "pointer":
         s["active_blocker_id"] = a
         board.execute("UPDATE task_recovery SET state_json=? WHERE task_id=?", (json.dumps(s), t))
@@ -54,11 +58,14 @@ def test_corrupt_audit_refuses_reads_classification_and_reports(board, damage):
     with pytest.raises(ValueError):
         classify(board, t, v)
     assert list(board.iterdump()) == before
-    assert kb.unblock_task(board, t)
-    claim = kb.claim_task(board, t, claimer="worker")
-    before = list(board.iterdump())
-    with pytest.raises(ValueError):
-        kb.block_task(board, t, reason="refuse", expected_run_id=claim.current_run_id)
+    if phase == "held":
+        with pytest.raises(ValueError):
+            kb.unblock_task(board, t)
+        with pytest.raises(ValueError):
+            kb.claim_task(board, t, claimer="worker")
+    else:
+        with pytest.raises(ValueError):
+            kb.block_task(board, t, reason="refuse", expected_run_id=claim.current_run_id)
     assert list(board.iterdump()) == before
 
 @pytest.mark.parametrize("lower_bound", [0, 3])

@@ -1455,13 +1455,13 @@ def dispatch_once(
         )
 
     try:
-        db_path = _kb.kanban_db_path(board=board)
+        db_path = _kbc.connection_db_path(conn)
     except Exception:
-        # Must not lose the tick — fall through to an unguarded dispatch.
-        result = _locked_tick()
+        # Unknown board identity cannot safely enter the protected dispatch path.
+        result = DispatchResult(skipped_locked=True)
         _kb._fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
         return result
-    with _kbc._dispatch_tick_lock(db_path) as held:
+    with _kbc._dispatch_tick_lock(db_path, strict=True) as held:
         if not held:
             result = DispatchResult(skipped_locked=True)
         else:

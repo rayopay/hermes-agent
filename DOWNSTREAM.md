@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current scope:** RP-HERMES-002 incremental implementation and isolated validation. Reviewed increments protect unclassified recurrence and implement native stable blocker identity, audited classification, conservative legacy tracking and terminal-cycle history. Orchestrator triage recovery and supported recovery surfaces remain outstanding. This branch is not merge/deployment-ready. Other change entries below retain their groundwork baseline; their independent implementation is tracked in PRs #3 and #5, not included in this branch.
+**Current scope:** RP-HERMES-002 incremental implementation and isolated validation. Reviewed increments implement blocker identity/classification, native retry/resolved-resume, scoped owner-attested settlement, dispatch exclusion and phase/history safeguards. Agent-tool/CLI release integration and no-Ready finalization remain outstanding. This branch is not merge/deployment-ready. Other change entries below retain their groundwork baseline; their independent implementation is tracked in PRs #3 and #5, not included in this branch.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -37,10 +37,10 @@ Status meanings:
    - Merge / deployment: neither performed.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
    - Priority: third downstream change; developed independently of the open RP-HERMES-001/003 changes, with combined qualification required before release.
-   - Status: **In implementation — native identity/classification and agent-tool/CLI classification surfaces tested and independently reviewed; safe release/resolution outstanding**.
+   - Status: **In implementation — native retry/resolved-resume tested and independently reviewed; agent-tool/CLI release integration and no-Ready finalization outstanding**.
    - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
    - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
-   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest bounded native/surface suite: **139 passed across 14 files**, plus **51 passed across five affected tool/CLI files**. Completion/reopen and projection-corruption defects were causally reproduced, corrected and independently re-reviewed; exact evidence and remaining limits are in the design document. These suites include earlier cases; totals are not cumulative feature coverage.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest deduplicated bounded qualification: **343 passed across 25 files**, including prior native/surface, affected tool/CLI, dispatch and dashboard regressions. Independent specification and quality reviews approved the native recovery increment after causal policy fixes. Exact evidence and remaining limits are in the design document; totals are not cumulative feature coverage.
    - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation

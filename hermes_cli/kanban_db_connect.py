@@ -157,18 +157,29 @@ def _cross_process_init_lock(path: Path):
             handle.close()
 
 
+def connection_db_path(conn: sqlite3.Connection) -> Path:
+    """Lock the actual main database, never a caller-selected board alias."""
+    rows = [row for row in conn.execute("PRAGMA database_list") if row[1] == "main"]
+    if len(rows) != 1 or not rows[0][2]:
+        raise ValueError("Dispatch exclusion requires a file-backed main database")
+    return Path(rows[0][2]).resolve(strict=True)
+
+
 @contextlib.contextmanager
-def _dispatch_tick_lock(db_path: Path):
-    """Non-blocking single-writer guard around one dispatcher tick; yields
-    ``True`` if this process holds the board's ``.dispatch.lock``, else
-    ``False`` (caller skips the tick).
+def _dispatch_tick_lock(db_path: Path, *, strict: bool = False):
+    """Non-blocking exclusion for dispatcher ticks and native recovery.
+
+    Production callers use ``strict=True``: yield ``True`` only while holding
+    the board's ``.dispatch.lock``; yield ``False`` on contention or failure.
+    The legacy default permits lock-file open failures (yields ``True`` without
+    a lock). Unsupported locking yields ``False`` regardless of ``strict``.
 
     Two dispatchers (e.g. an orphan gateway escaping its service cgroup) both
     pass ``busy_timeout`` and race on WAL frames — the root cause of
     multi-writer corruption; this is defense-in-depth behind
     ``_guard_supervised_gateway_conflict``. Non-blocking on purpose: the
     gateway's async watcher must never stall; the loser retries next interval.
-    Without ``fcntl``/``msvcrt`` it degrades to a no-op (yields ``True``).
+    Missing ``fcntl``/``msvcrt`` fails closed (yields ``False``).
 
     Motivation (issue #35240): a ``hermes gateway run --replace`` / ``gateway restart`` invoked from a shell
     on a systemd/launchd host can leave an orphan gateway whose dispatcher escapes the service cgroup,
@@ -185,12 +196,12 @@ def _dispatch_tick_lock(db_path: Path):
         handle = lock_path.open("a+b")
         try:
             acquired = _try_lock_nb(handle)
-        except (OSError, AttributeError):
+        except (OSError, AttributeError, ImportError):
             acquired = False
     except OSError:
-        # Can't even open the lock file (permissions, read-only FS): degrade to
-        # a no-op so a probe failure never blocks dispatch.
-        acquired = True
+        # Open failure is fail-closed for strict production callers; only the
+        # legacy default retains its fail-open behavior.
+        acquired = not strict
         handle = None
     try:
         yield acquired

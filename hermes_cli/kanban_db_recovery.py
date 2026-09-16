@@ -48,7 +48,7 @@ def _validate(state):
             raise ValueError("Malformed or unsupported task recovery state")
 
     try:
-        require(set(state) == {"version", "active_blocker_id", "active_event_id", "blockers", "reports", "corrections"})
+        require(set(state) - {"resolutions"} == {"version", "active_blocker_id", "active_event_id", "blockers", "reports", "corrections"})
         require(type(state["version"]) is int and state["version"] == 1)
         require(isinstance(state["blockers"], dict) and isinstance(state["reports"], dict))
         require(isinstance(state["corrections"], list))
@@ -62,7 +62,7 @@ def _validate(state):
             require(isinstance(identity, str) and len(identity) == 32 and all(c in "0123456789abcdef" for c in identity))
             require(set(blocker) == {"cycle", "count", "legacy_lower_bound"})
             require(all(type(v) is int and v >= 0 for v in blocker.values()))
-            require(blocker["cycle"] == 1)  # no resolution/cycle API in this slice
+            require(blocker["cycle"] >= 1)
             counts[identity] = blocker["legacy_lower_bound"]
         for event, report in state["reports"].items():
             require(event.isdigit() and int(event) > 0)
@@ -72,6 +72,14 @@ def _validate(state):
                 require(report[field] is None or report[field] in counts)
             if report["counted"]:
                 counts[report["blocker_id"]] += 1
+        cycles = dict.fromkeys(counts, 1)
+        for resolution in state.get("resolutions", []):
+            identity = resolution["blocker_id"]
+            require(resolution["cycle"] == cycles[identity])
+            require(type(resolution["count"]) is int and resolution["count"] >= 1)
+            counts[identity] -= resolution["count"]
+            cycles[identity] += 1
+        require(all(state["blockers"][key]["cycle"] == value for key, value in cycles.items()))
         require(all(state["blockers"][key]["count"] == value for key, value in counts.items()))
         require(all(type(event) is int and event > 0 for event in state["corrections"]))
         require(len(set(state["corrections"])) == len(state["corrections"]))
@@ -97,27 +105,40 @@ def _legacy_report(conn, task):
 
 def _audit_epoch(conn, task_id, state=None, *, after=0, before=None):
     """Replay one epoch's immutable attribution history within event boundaries."""
-    reports, corrections = {}, []
+    reports, corrections, resolutions, enrollments = {}, [], [], []
     for row in conn.execute(
             "SELECT id, kind, payload FROM task_events WHERE task_id=? "
             "AND id > ? AND (? IS NULL OR id < ?) "
-            "AND kind IN ('blocked','block_loop_detected','dependency_wait','blocker_classified') ORDER BY id",
+            "AND kind IN ('blocked','block_loop_detected','dependency_wait','blocker_classified','blocker_resolved','blocker_legacy_enrolled') ORDER BY id",
             (task_id, after, before, before)):
         try:
             payload = json.loads(row["payload"] or "{}")
             if not isinstance(payload, dict):
                 raise ValueError("Malformed recovery audit payload")
-            if row["kind"] == "blocker_classified":
+            if row["kind"] == "blocker_legacy_enrolled":
+                enrollments.append((row["id"], payload))
+            elif row["kind"] == "blocker_resolved":
+                resolutions.append((row["id"], payload))
+            elif row["kind"] == "blocker_classified":
                 corrections.append((row["id"], payload))
             elif "blocker_id" in payload:
                 reports[str(row["id"])] = (row["kind"], payload)
         except (TypeError, ValueError) as exc:
             raise ValueError("Malformed recovery audit payload") from exc
     if state is None:
-        if reports or corrections:
+        if reports or corrections or resolutions or enrollments:
             raise ValueError("Recovery projection missing for tracked audit history")
         return
     try:
+        if enrollments:
+            from hermes_cli.kanban_db_recovery_provenance import enrollment_report
+            if len(enrollments) != 1 or any(p.get("legacy_seed") is not None for _, p in corrections):
+                raise ValueError("Conflicting legacy enrollment seeds")
+            event, payload = enrollments[0]
+            if any(int(e) < event for e in reports) or any(e < event for e, _ in corrections + resolutions):
+                raise ValueError("Legacy enrollment must precede tracked history")
+            report_id, report = enrollment_report(conn, task_id, event, payload, after)
+            reports[report_id] = report
         for index, (event, payload) in enumerate(corrections):
             seed = payload.get("legacy_seed")
             if seed is None:
@@ -142,7 +163,6 @@ def _audit_epoch(conn, task_id, state=None, *, after=0, before=None):
             report = state["reports"][event]
             identity = report["original_blocker_id"]
             if (payload["blocker_id"] != identity
-                    or payload.get("blocker_cycle") != (1 if identity else None)
                     or report["counted"] != (kind != "dependency_wait")):
                 raise ValueError("Recovery original report disagrees with audit")
             effective[event] = identity
@@ -152,7 +172,6 @@ def _audit_epoch(conn, task_id, state=None, *, after=0, before=None):
                     or payload["from_blocker_id"] != effective[target]
                     or payload["to_blocker_id"] not in state["blockers"]
                     or payload["from_blocker_id"] == payload["to_blocker_id"]
-                    or payload["cycle"] != 1
                     or payload["revision"] != payload["prior_revision"] + 1
                     or int(target) != max(int(e) for e in reports if int(e) < event)):
                 raise ValueError("Recovery correction chain disagrees with audit")
@@ -186,11 +205,32 @@ def _audit_epoch(conn, task_id, state=None, *, after=0, before=None):
                 raise ValueError("Recovery immutable seed appears after first report")
         if any(counts[key] != blocker["legacy_lower_bound"] for key, blocker in state["blockers"].items()):
             raise ValueError("Recovery lower bound disagrees with immutable seed")
+        expected_resolutions = [{"event_id": event, **payload["resolution"]} for event, payload in resolutions]
+        if state.get("resolutions", []) != expected_resolutions:
+            raise ValueError("Recovery resolution projection disagrees with audit")
+        resolution_map = dict(resolutions)
+        cycles = dict.fromkeys(counts, 1)
+        consumed = set()
         correction_map = dict(corrections)
-        for event in sorted({int(e) for e in reports} | set(correction_map)):
-            if event in correction_map:
+        for event in sorted({int(e) for e in reports} | set(correction_map) | set(resolution_map)):
+            if event in resolution_map:
+                payload = resolution_map[event]
+                resolution = payload["resolution"]
+                identity = resolution["blocker_id"]
+                refs = resolution["evidence_refs"]
+                if (resolution["cycle"] != cycles[identity] or resolution["count"] != counts[identity]
+                        or not refs or consumed.intersection(refs)
+                        or payload["block_event_id"] >= event
+                        or effective.get(str(payload["block_event_id"])) != identity):
+                    raise ValueError("Recovery resolution lineage disagrees with audit")
+                consumed.update(refs)
+                counts[identity] = 0
+                cycles[identity] += 1
+            elif event in correction_map:
                 payload = correction_map[event]
                 old, new = payload["from_blocker_id"], payload["to_blocker_id"]
+                if payload["cycle"] != cycles[new]:
+                    raise ValueError("Recovery correction cycle disagrees with audit")
                 if new not in {p["blocker_id"] for _, p in reports.values()} and state["blockers"][new]["legacy_lower_bound"]:
                     raise ValueError("Correction-created identity has invented lower bound")
                 counts[old] -= 1
@@ -198,6 +238,8 @@ def _audit_epoch(conn, task_id, state=None, *, after=0, before=None):
             else:
                 kind, payload = reports[str(event)]
                 identity = payload["blocker_id"]
+                if payload.get("blocker_cycle") != (cycles[identity] if identity else None):
+                    raise ValueError("Recovery report cycle disagrees with audit")
                 if kind != "dependency_wait":
                     counts[identity] += 1
                     if "recurrences" in payload and payload["recurrences"] != counts[identity]:
@@ -371,6 +413,17 @@ def record_report(conn, task_id, state, revision, event_id, kind):
     _save(conn, task_id, state, revision)
 
 
+def recovery_hold(conn, task_id):
+    """Status-independent exhausted-identity fence; completed epochs are history."""
+    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if row is None:
+        return False
+    state, _, legacy = _load(conn, dict(row))
+    from hermes_cli.kanban_db import BLOCK_RECURRENCE_LIMIT
+    return (report_count(state) >= BLOCK_RECURRENCE_LIMIT
+            or (legacy and int(row["block_recurrences"] or 0) >= BLOCK_RECURRENCE_LIMIT))
+
+
 def _actor():
     from agent.delegation_context import KANBAN_ENV_KEYS, is_delegated_child_process_context
     from gateway.session_context import get_session_env
@@ -434,7 +487,7 @@ def classify_blocker(conn, task_id, *, observed_token, block_event_id,
         state["active_blocker_id"] = new
         report["blocker_id"] = new
         payload = kb.redact_review_value({"block_event_id": block_event_id,
-            "from_blocker_id": old, "to_blocker_id": new, "cycle": 1,
+            "from_blocker_id": old, "to_blocker_id": new, "cycle": state["blockers"][new]["cycle"],
             "observed_token": observed_token, "actor": actor,
             "rationale": rationale.strip(), "evidence_refs": evidence_refs,
             "prior_revision": view["revision"], "revision": view["revision"] + 1})
