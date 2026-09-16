@@ -944,6 +944,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     block_recurrences    INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS task_recovery (
+    task_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    state_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS task_links (
     parent_id  TEXT NOT NULL,
     child_id   TEXT NOT NULL,
@@ -1851,12 +1857,13 @@ def _insert_comment(
 def _append_event(
     conn: sqlite3.Connection, task_id: str, kind: str, payload: Optional[dict] = None, *,
     run_id: Optional[int] = None,
-) -> None:
+) -> int:
     """Insert an event row inside the caller's txn; ``run_id`` groups it by attempt (NULL = task-scoped)."""
-    conn.execute(
+    cursor = conn.execute(
         "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
         "VALUES (?, ?, ?, ?, ?)", (task_id, run_id, kind, _json_or_null(payload), int(time.time())),
     )
+    return int(cursor.lastrowid)
 
 
 def _end_run(
@@ -2607,11 +2614,13 @@ def complete_task(
         event_summary = handoff_summary
         if prior_status == "review" and not event_summary:
             event_summary = _REVIEW_APPROVED_NOTE
-        _append_event(
+        completed_event_id = _append_event(
             conn, task_id, "completed",
             _completed_event_payload(result, event_summary, verified_cards, metadata),
             run_id=run_id,
         )
+        from hermes_cli.kanban_db_recovery import close_completed_cycle
+        close_completed_cycle(conn, task_id, completed_event_id)
     _flag_phantom_prose_refs(conn, task_id, run_id, summary, result, verified_cards)
     # Success wipes the breaker counter (history stays on the event log).
     _clear_failure_counter(conn, task_id)
@@ -2941,14 +2950,17 @@ def block_task(
         raise ValueError(f"block kind must be one of {sorted(VALID_BLOCK_KINDS)} or None")
     with write_txn(conn):
         cur_row = conn.execute(
-            "SELECT status, block_kind, block_recurrences FROM tasks WHERE id = ?", (task_id,),
+            "SELECT * FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
-        if cur_row is None:
+        if (cur_row is None or cur_row["status"] not in ("running", "ready")
+                or (expected_run_id is not None and cur_row["current_run_id"] != int(expected_run_id))):
             return False
+        from hermes_cli.kanban_db_recovery import prepare_report, report_count, record_report
+        recovery, revision = prepare_report(conn, dict(cur_row), kind)
         source_status = _retry_status_for_run(conn, task_id) if cur_row["status"] == "running" else "ready"
         new_status, event_kind, set_sql, params, payload = _route_block(
             kind, reason, source_status, prev_kind=_row_get(cur_row, "block_kind"),
-            prev_recurrences=int(_row_get(cur_row, "block_recurrences") or 0),
+            prev_recurrences=report_count(recovery),
         )
         sql = f"""
                 UPDATE tasks
@@ -2969,7 +2981,13 @@ def block_task(
         run_id = _end_or_synthesize_run(
             conn, task_id, outcome="blocked", status="blocked", summary=reason, synthesize=bool(reason),
         )
-        _append_event(conn, task_id, event_kind, payload, run_id=run_id)
+        payload["blocker_id"] = recovery["active_blocker_id"]
+        payload["blocker_cycle"] = 1 if recovery["active_blocker_id"] else None
+        if not recovery["reports"]:
+            # Bind inherited native budget even when this report is uncounted.
+            payload["blocker_seed"] = int(cur_row["block_recurrences"] or 0)
+        event_id = _append_event(conn, task_id, event_kind, payload, run_id=run_id)
+        record_report(conn, task_id, recovery, revision, event_id, kind)
         blocked_task = get_task(conn, task_id)
         if kind == "dependency":
             # Historical ordering: the dependency lane fires inside the txn.
@@ -3587,7 +3605,7 @@ def archive_task(conn: sqlite3.Connection, task_id: str, *, signal_fn=None) -> b
 def _delete_task_relations(conn: sqlite3.Connection, task_id: str) -> None:
     """Delete every row referencing ``task_id`` (schema has no ON DELETE CASCADE)."""
     conn.execute("DELETE FROM task_links WHERE parent_id = ? OR child_id = ?", (task_id, task_id))
-    for table in ("task_comments", "task_events", "task_runs", "kanban_notify_subs"):
+    for table in ("task_comments", "task_events", "task_runs", "kanban_notify_subs", "task_recovery"):
         conn.execute(f"DELETE FROM {table} WHERE task_id = ?", (task_id,))
 
 
@@ -3940,7 +3958,8 @@ def gc_events(conn: sqlite3.Connection, *, older_than_seconds: int = 30 * 24 * 3
     cutoff = int(time.time()) - int(older_than_seconds)
     with write_txn(conn):
         cur = conn.execute(
-            "DELETE FROM task_events WHERE created_at < ? AND kind != 'decomposed' AND task_id IN "
+            "DELETE FROM task_events WHERE created_at < ? AND kind NOT IN ('decomposed', 'blocked', 'block_loop_detected', 'dependency_wait', 'blocker_classified', 'blocker_cycle_closed') "
+            "AND NOT (kind='completed' AND task_id IN (SELECT task_id FROM task_recovery)) AND task_id IN "
             "(SELECT id FROM tasks WHERE status IN ('done', 'archived'))", (cutoff,),
         )
     return int(cur.rowcount or 0)

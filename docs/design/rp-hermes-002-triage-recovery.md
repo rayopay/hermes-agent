@@ -4,7 +4,7 @@
 
 Tracking PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6) (ready for review; implementation and verification in progress, not merge/deployment ready).
 
-**Behaviour approved; incremental implementation in progress.** This document formalises the agreed RP-HERMES-002 behaviour. The first counter-protection increment has focused test and independent review evidence below; the complete recovery feature, integration, merge, deployment and live-card recovery remain outstanding.
+**Behaviour approved; incremental implementation in progress.** This document formalises the agreed RP-HERMES-002 behaviour. Counter protection and native identity/classification increments have test and independent review evidence below; the complete orchestrator recovery feature, supported recovery surfaces, integration, merge, deployment and live-card recovery remain outstanding.
 
 Develop in a dedicated branch of the maintained Hermes fork. Do not modify the installed runtime, live boards, profile permissions, product workspaces or running workers. Publication, release and live-card disposition are separate actions. Product orchestration remains with its owning PM; Hermes maintenance remains with Default.
 
@@ -156,7 +156,34 @@ Environment: Python 3.12.3, pytest 9.1.1, 85 distributions from unchanged existi
 
 No full-suite, real-worker/process-tree, dashboard application, migration, external acceptance, merge, deployment or live-card recovery proof is claimed by this increment.
 
-## Technical questions to settle during design review
+## Native identity/classification increment: verified evidence
+
+Base of this increment: `fad0038417e4bb65d95467b1010dccdb2ee3a359`. This is a partial native implementation, not an operational triage-release feature.
+
+- An additive `task_recovery` projection and immutable native events retain server-generated blocker identities, original/effective report attribution, per-identity recurrence, conservative historical lower bounds and revision-bound classification. Category/prose changes do not mint cheaper identities.
+- `get_recovery_state` is read-only. `classify_blocker` requires a top-level native actor, an exact current observation and an unclaimed held card. Classification changes attribution, not status or dispatcher failure budget. Worker/delegated contexts are refused; existing cooperative runtime fences are not a claim of project-level RBAC or same-UID confinement.
+- Both direct classification of an already-held legacy card and first native reporting from a legacy card retain historical protection. The first tracked report immutably records its inherited budget, including dependency-first reports. Dependencies remain uncounted. Audit replay rejects projection-only identity, attribution or lower-bound corruption; legitimate zero-count historical identities remain valid.
+- Successful existing native completion closes the accounting epoch in its own transaction, bound to the actual completion event and revision. All identities, reports and corrections remain inspectable. Deliberate reopening starts fresh accounting consistent with baseline. Ordinary unblock, status changes and classification are not resolution events. Existing completion eligibility is unchanged: this does not enable triage finalization.
+- Additive native initialization and repeated initialization, actual pre-feature SQLite fixtures, delegated read-only behavior, transaction rollback, stale-observation interception using two native connections, and history-preserving GC are covered. Whole-task deletion remains an explicit history boundary.
+
+Canonical `scripts/run_tests.sh -j2`, retries disabled, admitted worktree-local environment and credential-free disposable HOME: **133 passed, zero failed across 13 files**, including prior increments. Independent specification and quality reviews accepted this bounded checkpoint after corrections.
+
+Causal failures retained rather than waived:
+
+1. Completion followed by deliberate reopening originally yielded candidate `triage/count 2` versus baseline `blocked/count 1`. The unchanged native probe now returns **blocked/count 1 for both**, with separate database dumps.
+2. Projection-only invented blocker origins produced ten failing assertions before correction. Thirteen focused cases passed afterward, preserving valid zero-count history.
+3. Dependency-first legacy conversion accepted six downward/upward projected-budget corruptions before correction. The final ten added cases pass, including valid legacy/fresh controls and exact no-mutation refusals. Initial ineligible-triage control-fixture failures are retained separately; successful qualification uses eligible native paths.
+
+Final production SHA-256 values:
+
+- `hermes_cli/kanban_db.py`: `864e85ea19691542bde89f852325f282520902f3444c8e64ebb56aa47411794a`.
+- `hermes_cli/kanban_db_recovery.py`: `6287a1899a73ff320e8ec2b12a6bb38acf9edbc86e8be0d8b0038a26afaa3b8c`.
+
+All nine checkpoint source/test/fixture hashes were stable during final verification. The 85 installed distribution names/versions remained unchanged; no additional installs or lock changes were made. The earlier environment-preparation limits still apply. Native SQLite selected its existing DELETE-journal safety fallback; this is not WAL, multi-OS or crash/power-loss qualification.
+
+No full-suite, actual tool/CLI recovery, HTTP dashboard recovery, live worker/process-tree settlement, external runtime lease, no-Ready triage finalization, combined-downstream integration, merge, deployment or live-card recovery proof is claimed. These are remaining work, not waived acceptance criteria. Mixed old/new writers remain unsupported; eventual deployment/rollback must drain writers and pair compatible state/code backups. This increment must not be deployed as the complete solution.
+
+## Technical questions remaining for recovery integration
 
 These are implementation details, not additional user policy decisions:
 
