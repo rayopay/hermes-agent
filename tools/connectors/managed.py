@@ -1,35 +1,12 @@
-#!/usr/bin/env python3
-"""Manage remote connector accounts served through the tool gateway.
+"""Managed connectors (Nous tool gateway): status, connect / reconnect, and the in-call ``wait``.
 
-``manage_connections`` is the never-deferred surface for connection
-lifecycle:
-
-- ``status`` — which connectors exist for this account and whether each is
-  connected (read-only).
-- ``connect`` / ``reconnect`` — start (or restart) an authorization flow.
-  The gateway returns a connect link, passed through UN-redacted: the model
-  shows it to the user, who opens it in a browser. Each connector's
-  ``instruction`` text is surfaced once per session, not on every call.
-- ``wait`` — block inside the call until the named connectors report
-  connected, or the budget runs out. A model has no clock: told to wait it
-  says "I'll check back in a minute" and its next action lands immediately,
-  so guidance produced a burst of polls rather than a paced one. Waiting
-  inside the call cannot be skipped and works the same on every platform.
-
-Scope: gateway connectors ONLY. Local MCP servers stay with ``setup_mcp``,
-which still exists and still works. An earlier draft folded ``install`` /
-``enable`` / ``authorize`` in here, but the desktop consent card arrives
-through a per-tool interception branch keyed on the name ``setup_mcp``
-(agent/tool_executor.py, agent/agent_runtime_helpers.py) and
-``registry.dispatch`` never forwards a ``callback``. So the fold could only
-ever return the "use the terminal" fallback while its schema advertised the
-consent flow — a promise with no delivery path.
-
-De-authentication is deliberately NOT exposed to the model: disconnecting
-an account is a user decision, made in the portal dashboard.
-
-Availability: gated by the portal sign-in the managed tools already use
-(``check_fn``), so signed-out sessions see exactly today's behavior.
+``connect`` / ``reconnect`` start (or restart) an authorization flow. The gateway returns a connect
+link, passed through UN-redacted: the model shows it to the user, who opens it in a browser. Each
+connector's ``instruction`` text is surfaced once per session, not on every call. ``wait`` blocks
+inside the call until the named connectors report connected, or the budget runs out. A model has
+no clock: told to wait it says "I'll check back in a minute" and its next action lands
+immediately, so guidance produced a burst of polls rather than a paced one. Waiting inside the
+call cannot be skipped and works the same on every platform.
 """
 
 import json
@@ -38,11 +15,9 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from tools.registry import registry, tool_error
+from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
-
-_CONNECTOR_ACTIONS = ("status", "connect", "reconnect", "wait")
 
 # (session_id, connector) pairs whose `instruction` text has already been
 # shown. Keyed per session, not per process: the gateway multiplexes many
@@ -104,18 +79,8 @@ _WAIT_UNFINISHED_NOTE = (
     "broken."
 )
 
-
-def _connectors_available() -> bool:
-    try:
-        from tools.tool_gateway.config import connectors_available
-
-        return connectors_available()
-    except Exception:
-        return False
-
-
 def _default_client():
-    from tools.tool_gateway.client import ConnectorClient
+    from tools.connectors.gateway.client import ConnectorClient
 
     return ConnectorClient()
 
@@ -291,35 +256,21 @@ def _wait_for_connections(
             )
         spent += gap
 
-
-def manage_connections(
+def run_managed_action(
+    action: str,
+    connectors: List[str],
     args: Dict[str, Any],
     *,
     client_factory: Optional[Callable[[], Any]] = None,
     seen_instructions: Optional[set] = None,
     rendered_links: Optional[Dict[str, Dict[str, float]]] = None,
     session_id: Optional[str] = None,
+    connectors_available: Optional[Callable[[], bool]] = None,
 ) -> str:
-    """Dispatch one ``manage_connections`` action. Returns a JSON string."""
-    action = str(args.get("action") or "status").strip().lower()
-
-    if action not in _CONNECTOR_ACTIONS:
-        return tool_error(
-            f"action must be one of {', '.join(_CONNECTOR_ACTIONS)}. "
-            "Local MCP servers are set up with setup_mcp, not here. "
-            "Disconnecting an account is done by the user in the Nous Portal "
-            "dashboard, not through this tool."
-        )
-
-    raw_connectors = args.get("connectors")
-    if isinstance(raw_connectors, str):
-        raw_connectors = [raw_connectors]
-    connectors: List[str] = []
-    if isinstance(raw_connectors, list):
-        for c in raw_connectors:
-            c = str(c or "").strip().lower()
-            if c and c not in connectors:
-                connectors.append(c)
+    """One managed-connector action (status / connect / reconnect / wait). Returns the tool's
+    JSON string. ``connectors`` are the normalized managed target names."""
+    if connectors_available is not None and not connectors_available():
+        return tool_error("Connectors are not available in this session.")
 
     try:
         client = (client_factory or _default_client)()
@@ -437,78 +388,3 @@ def manage_connections(
             f"The connector gateway request failed: {exc}. "
             "If this persists, the user can manage connections in the Nous Portal."
         )
-
-
-MANAGE_CONNECTIONS_SCHEMA = {
-    "name": "manage_connections",
-    "description": (
-        "Manage remote connector accounts (Gmail, Linear, Notion, ...) served "
-        "through the tool gateway. Actions: "
-        "'status' lists connectors and whether each is connected; 'connect' "
-        "starts an authorization for the given connectors and returns a link "
-        "for the USER to open in a browser (never open it yourself); "
-        "'reconnect' restarts a broken authorization; "
-        "'wait' blocks until the given connectors report connected. Pass "
-        "SEVERAL slugs in one call to get all authorization links at once. "
-        "When a connector tool "
-        "call returns CONNECTION_REQUIRED, use 'connect' and show the link. "
-        "Send the message that shows the user the links FIRST; on your NEXT "
-        "turn call 'wait' with those same slugs instead of guessing when the "
-        "user is done — it polls for you (a wait in the same turn as the "
-        "connect is bounced, because the user cannot have seen the links "
-        "yet). 'wait' requires 'connectors', and only accepts connectors this "
-        "session already addressed with 'connect' (already-connected apps "
-        "count). A 'timeout' or 'interrupted' result is NOT an "
-        "error: the user has not finished connecting, so ask them whether to "
-        "keep waiting, continue without those apps, or get fresh links. "
-        "Local MCP servers are configured separately. "
-        "This tool can NOT disconnect, delete, or revoke an account — that is "
-        "deliberately user-only. When asked, say so and direct the user to "
-        "the Nous Portal (their org's Connectors page) or the desktop app."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": list(_CONNECTOR_ACTIONS),
-                "description": "Defaults to status.",
-            },
-            "connectors": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Connector slugs. REQUIRED for connect, reconnect and wait "
-                    "(e.g. [\"gmail\", \"linear\"]); optional filter for status."
-                ),
-            },
-            "timeout_seconds": {
-                "type": "integer",
-                "description": (
-                    "For action 'wait' only: how long to hold the call open. "
-                    f"Defaults to {int(_WAIT_DEFAULT_SECONDS)}, clamped to "
-                    f"{int(_WAIT_MIN_SECONDS)}-{int(_WAIT_MAX_SECONDS)}. Ask for "
-                    "more and the result carries a 'timeout_note' saying the cap "
-                    "was applied; call wait again to keep waiting."
-                ),
-            },
-        },
-        "required": [],
-    },
-}
-
-
-registry.register(
-    name="manage_connections",
-    toolset="connections",
-    schema=MANAGE_CONNECTIONS_SCHEMA,
-    # Registry dispatch does not re-run check_fn: enforce the off switch for
-    # stale schemas without rebuilding a conversation's cached tool list.
-    handler=lambda args, **kw: (
-        manage_connections(args, session_id=kw.get("session_id"))
-        if _connectors_available()
-        else tool_error("Connectors are not available in this session.")
-    ),
-    check_fn=_connectors_available,
-    emoji="🔗",
-)
