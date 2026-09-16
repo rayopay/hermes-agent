@@ -2,7 +2,7 @@
 
 This is a maintained fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent), not a replacement platform. Preserve upstream attribution, licensing, configuration semantics, and native lifecycle safeguards while carrying the smallest necessary set of reviewed fixes.
 
-**Current branch scope:** RP-HERMES-003 implementation and isolated verification. The branch removes required-check policy discovery while retaining reported exact-head CI acceptance. It is submitted for review in [PR #5](https://github.com/rayopay/hermes-agent/pull/5), not merged or deployed. Other change entries are inherited from this branch's fork-main base; their separate implementation branches remain outside this change.
+**Current scope:** RP-HERMES-002 remains under integration qualification on pinned fork main `36f2e2ec916a97f960bfb356f92eb549d5e58621`. Reviewed increments implement blocker identity/classification, native and agent-tool/CLI retry/resolved-resume and bounded direct-triage finalization, scoped owner-attested settlement, dispatch exclusion and phase/history safeguards. The pinned base includes merged RP-HERMES-003 ([PR #5](https://github.com/rayopay/hermes-agent/pull/5)): reported exact-head CI acceptance without required-check policy discovery. Merge is not deployment evidence. RP-HERMES-001 remains open in [PR #3](https://github.com/rayopay/hermes-agent/pull/3) and is not integrated here. Final integration qualification remains outstanding; this branch is not merge/deployment-ready.
 
 **Tracking PR:** [rayopay/hermes-agent#1](https://github.com/rayopay/hermes-agent/pull/1) — documentation groundwork; implementation and deployment are tracked separately below.
 
@@ -28,20 +28,22 @@ Status meanings:
 
 1. **RP-HERMES-001 — PR-linked continuation without a blanket 24-hour delay**
    - Priority: first implementation.
-   - Status: **Proposed — implementation not started**.
-   - Implementation PR: not opened.
+   - Status: **In review — open implementation, not integrated in this candidate**.
+   - Implementation PR: [rayopay/hermes-agent#3](https://github.com/rayopay/hermes-agent/pull/3).
    - Merge / deployment: neither performed.
 2. **RP-HERMES-003 — reported exact-head CI acceptance without policy discovery**
    - Priority: approved as a narrow, independent change.
-   - Status: **In review — scoped local verification complete; PR review/release qualification outstanding**.
+   - Status: **Merged into fork main — deployment not established**.
    - Implementation PR: [rayopay/hermes-agent#5](https://github.com/rayopay/hermes-agent/pull/5); branch `fix/ci-status-without-policy-discovery`.
    - Base: `d77d61287012a53fe915c11e950bbcc72a0a7630`; implementation checkpoint: `0b3bd403443b7264ba63d274be414a8a85034ff5`.
-   - Merge / deployment: neither performed.
+   - Merge: `74fa18f59f9671012788db5abf52ffa14e78d1a7`; included in pinned main `36f2e2ec916a97f960bfb356f92eb549d5e58621`. Deployment: not established.
 3. **RP-HERMES-002 — meaningful block recurrence and explicit triage recovery**
-   - Priority: queued after RP-HERMES-003.
-   - Status: **Proposed — implementation not started**.
-   - Implementation PR: not opened.
-   - Merge / deployment: neither performed.
+   - Priority: third downstream change; developed independently of RP-HERMES-001/003. RP-003 is now in the pinned base; RP-001 remains open and separate. Combined qualification is required before release.
+   - Status: **In implementation — settlement CI correction tested and independently reviewed; owner-positive CLI execution blocked, fresh hosted CI/review and final qualification outstanding**.
+   - Design: [Block recurrence and orchestrator recovery](docs/design/rp-hermes-002-triage-recovery.md).
+   - Scope includes user-directed and evidence-backed autonomous orchestrator recovery, with worker restrictions, preserved history and no replay of accepted work.
+   - Implementation PR: [rayopay/hermes-agent#6](https://github.com/rayopay/hermes-agent/pull/6), ready for review; not merge/deployment ready. Latest deduplicated bounded qualification: **779 passed across 47 files**, retaining all prior 738/45 cases and adding shared settlement-probe controls and the repository scanner. Independent specification and quality reviews approved the UTF-8 and conservative PID-probe correction; targeted Ruff and the full-repository Windows-footgun scanner pass locally. Owner-positive executable recovery remains blocked/unexecuted under inherited authority. Historical hosted failures and flakes remain documented separately; local results do not establish current hosted CI readiness. Exact evidence and remaining limits are in the design document; totals are not cumulative feature coverage.
+   - Merge / deployment: neither performed. Live-board recovery is outside this development approval.
 
 ## RP-HERMES-001: PR-linked continuation
 
@@ -81,7 +83,7 @@ The approved narrow change removes policy discovery without replacing it with op
 
 The deliberate trade-off is that every reported failure counts, including optional failures, while expected checks that never appear cannot be detected. This is reported-CI acceptance—not proof that a build/test workflow ran, merge approval or deployment qualification. No schema/configuration migration or automatic live-card recovery is introduced.
 
-**Status:** implementation submitted in [PR #5](https://github.com/rayopay/hermes-agent/pull/5), with scoped local verification; not merged or deployed. Detailed decisions, rejected alternatives, exact acceptance rules, verification scope and rollback considerations live in the [RP-HERMES-003 design decision record](docs/decisions/RP-HERMES-003-reported-ci-acceptance.md).
+**Status:** [PR #5](https://github.com/rayopay/hermes-agent/pull/5) is merged into the pinned fork-main base; deployment is not established. Detailed decisions, rejected alternatives, exact acceptance rules, verification scope and rollback considerations live in the [RP-HERMES-003 design decision record](docs/decisions/RP-HERMES-003-reported-ci-acceptance.md).
 
 ## RP-HERMES-002: Block recurrence and triage recovery
 

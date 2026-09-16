@@ -510,10 +510,59 @@ KANBAN_UNBLOCK_SCHEMA = _schema(
         "Unblock a Kanban task. It moves to ready when all parents are done, "
         "or todo while any parent remains open. Orchestrator-only — only "
         "profiles with the kanban toolset can unblock routed work; "
-        "dispatcher-spawned task workers never see this tool."
+        "dispatcher-spawned task workers never see this tool. With recovery.action=classify, "
+        "audit an exact blocker report without releasing it. retry/resolved_resume invoke native "
+        "owner recovery; returned status/eligible describe scheduling, never a worker launch. "
+        "finalize completes accepted tracked settled triage directly to done, not release or execution."
     ),
     {
-        "task_id": _prop("string", "Blocked task id to move to ready or parent-gated todo."),
+        "task_id": _prop("string", "Target task id; classification accepts held blocked/triage tasks."),
+        "recovery": {
+            "type": "object",
+            "description": "Optional audited classify/retry/resolved_resume/finalize. Omit for conventional unblock; null is invalid. "
+                           "Use the exact observation from kanban_show.recovery. Release/finalize requires blocker_id, "
+                           "initiation_mode and settlement_refs; user_directed requires instruction_ref. "
+                           "OWNER must assess every settlement_scope.template scope before adding assertion "
+                           "and reference. The template is not evidence or permission. Finalize requires an already-bound "
+                           "exact GitHub PR contract, current native acceptance, tracked triage and no scratch workspace. "
+                           "Input references are attribution, not acceptance proof. Finalize returns completed/status done, "
+                           "never eligible or released. Errors can follow committed done: inspect status, never replay.",
+            "properties": {
+                "action": {"type": "string", "enum": ["classify", "retry", "resolved_resume", "finalize"]},
+                "observed_token": _prop("string", "Exact observed_token from show."),
+                "block_event_id": _prop("integer", "Exact active_event_id from show."),
+                "existing_blocker_id": _prop("string", "Classify only: known identity to reattribute to; omit for a distinct identity."),
+                "blocker_id": _prop("string", "Release/finalize only: exact active_blocker_id from show."),
+                "initiation_mode": {"type": "string", "enum": ["user_directed", "autonomous"]},
+                "instruction_ref": _prop("string", "Required for user_directed release/finalize; omit for autonomous if absent. A reference is not authority."),
+                "settlement_refs": {
+                    "type": "array", "minItems": 1, "maxItems": 1,
+                    "description": "Release/finalize only: exact fresh template plus explicit OWNER assessment. Native checks cannot prove detached/external/workspace settlement.",
+                    "items": {
+                        "type": "object", "additionalProperties": False,
+                        "properties": {
+                            "observed_token": {"type": "string"}, "task_id": {"type": "string"},
+                            "block_event_id": {"type": "integer"}, "blocker_id": {"type": "string"},
+                            "board_path": {"type": "string"}, "host": {"type": "string"},
+                            "boot_id": {"type": "string"},
+                            "run_ids": {"type": "array", "items": {"type": "integer"}},
+                            "scopes": {"type": "array", "items": {"type": "string"}},
+                            "observed_at": {"type": "integer", "description": "Exact template time; valid for 300 seconds."},
+                            "assertion": {"type": "string", "enum": ["settled"]},
+                            "reference": {"type": "string", "minLength": 1, "maxLength": 1000},
+                        },
+                        "required": ["observed_token", "task_id", "block_event_id", "blocker_id",
+                                     "board_path", "host", "boot_id", "run_ids", "scopes",
+                                     "observed_at", "assertion", "reference"],
+                    },
+                },
+                "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 20,
+                                  "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+            },
+            "required": ["action", "observed_token", "block_event_id", "rationale", "evidence_refs"],
+            "additionalProperties": False,
+        },
     },
     ["task_id"],
 )

@@ -693,7 +693,10 @@ def _set_status_direct(conn: sqlite3.Connection, task_id: str, new_status: str) 
     so attempt history isn't orphaned; the worker is killed only AFTER the txn commits."""
     terminations: list[tuple[Optional[int], Optional[str]]] = []
     effective_status = new_status
+    from hermes_cli.kanban_db_recovery import recovery_hold
     with kanban_db.write_txn(conn):
+        if new_status in {"ready", "review", "todo", "running"} and recovery_hold(conn, task_id):
+            return False
         prev = conn.execute(
             "SELECT status, current_run_id, worker_pid, claim_lock FROM tasks WHERE id = ?", (task_id,)).fetchone()
         if prev is None:

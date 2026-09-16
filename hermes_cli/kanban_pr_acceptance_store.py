@@ -10,14 +10,20 @@ def _snapshot(conn, task_id):
     return tuple(row) if row else None
 
 
-def prepare_acceptance(conn, task_id, expected_run_id, metadata):
+def prepare_acceptance(conn, task_id, expected_run_id, metadata, *, _recovery=None):
     snapshot = _snapshot(conn, task_id)
     if snapshot is None:
         return False
     run_id, status, contract = snapshot
     if not contract or contract == "local-only":
         return None
-    if status not in {"running", "ready", "blocked", "review"} or (expected_run_id is not None and run_id != expected_run_id):
+    if _recovery is not None:
+        from hermes_cli.kanban_db_recovery_finalize import _Finalization
+        if type(_recovery) is not _Finalization:
+            raise ValueError("invalid internal completion context")
+        _recovery.validate(conn, task_id)
+    statuses = {"triage"} if _recovery is not None else {"running", "ready", "blocked", "review"}
+    if status not in statuses or (expected_run_id is not None and run_id != expected_run_id):
         return False
     published_pr = metadata.get("published_pr") if isinstance(metadata, dict) else None
     match = _PR.fullmatch(published_pr) if isinstance(published_pr, str) else None

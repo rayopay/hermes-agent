@@ -711,7 +711,7 @@ class Task:
     goal_mode: bool = False
     goal_max_turns: Optional[int] = None
     session_id: Optional[str] = None         # originating HERMES_SESSION_ID; NULL from CLI/dashboard
-    # VALID_BLOCK_KINDS or None (legacy); kept across unblock so a same-kind re-block reads as a loop.
+    # VALID_BLOCK_KINDS or None (legacy); descriptive category, not blocker identity.
     block_kind: Optional[str] = None
     block_recurrences: int = 0               # unblock-loop counter, see BLOCK_RECURRENCE_LIMIT
     completion_contract: Optional[str] = None
@@ -942,6 +942,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- successful completion — NOT on unblock (resetting on unblock is exactly
     -- the amnesia that let the loop run unbounded).
     block_recurrences    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS task_recovery (
+    task_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    state_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1851,12 +1857,13 @@ def _insert_comment(
 def _append_event(
     conn: sqlite3.Connection, task_id: str, kind: str, payload: Optional[dict] = None, *,
     run_id: Optional[int] = None,
-) -> None:
+) -> int:
     """Insert an event row inside the caller's txn; ``run_id`` groups it by attempt (NULL = task-scoped)."""
-    conn.execute(
+    cursor = conn.execute(
         "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
         "VALUES (?, ?, ?, ?, ?)", (task_id, run_id, kind, _json_or_null(payload), int(time.time())),
     )
+    return int(cursor.lastrowid)
 
 
 def _end_run(
@@ -2001,7 +2008,7 @@ def _resume_status_from_events(conn: sqlite3.Connection, task_id: str) -> str:
         "WHERE task_id = ? AND kind IN ("
         "'blocked', 'block_loop_detected', 'dependency_wait', 'gave_up', "
         "'unblocked', 'changes_requested', 'review_reopened', 'status', 'reclaimed', "
-        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited'"
+        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited', 'blocker_resolved', 'blocker_retried'"
         ") ORDER BY id DESC LIMIT 1", (task_id,),
     ).fetchone()
     payload = _json_dict(_row_get(row, "payload"))
@@ -2033,6 +2040,8 @@ def recompute_ready(conn: sqlite3.Connection, failure_limit: int = None) -> int:
         ).fetchall()
         for row in todo_rows:
             task_id = row["id"]
+            if recovery_hold(conn, task_id):
+                continue
             cur_status = row["status"]
             if cur_status == "blocked" and _has_sticky_block(conn, task_id):
                 # Explicit human-intervention block; only ``unblock_task`` may exit it.
@@ -2087,12 +2096,17 @@ def _parents_satisfied(conn: sqlite3.Connection, task_id: str) -> bool:
     ).fetchone() is None
 
 
+from hermes_cli.kanban_db_recovery import recovery_hold
+
+
 def _claim_and_open_run(
     conn: sqlite3.Connection, task_id: str, source_status: str, lock: str, expires: int, now: int,
     *, event_extra: Optional[dict] = None,
 ) -> Optional[int]:
     """CAS ``source_status -> running``, open a run row, emit ``claimed``; None
     when the CAS lost. Caller holds the txn."""
+    if recovery_hold(conn, task_id):
+        return None
     cur = conn.execute(
         f"""
         UPDATE tasks
@@ -2147,6 +2161,9 @@ def claim_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        # Refuse before dependency writes or dangling-run cleanup.
+        if recovery_hold(conn, task_id):
+            return None
         # Single enforcement point: never ready -> running with an undone
         # parent, whichever writer set 'ready'. Demote to 'todo';
         # recompute_ready re-promotes when the parents finish.
@@ -2180,6 +2197,8 @@ def claim_review_task(
     lock = claimer or _claimer_id()
     expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return None
         if not _parents_satisfied(conn, task_id):
             demoted = conn.execute(
                 "UPDATE tasks SET status = 'todo' "
@@ -2549,78 +2568,16 @@ def complete_task(
     :class:`HallucinatedCardsError` after an auditable event; afterwards the
     prose is scanned for unresolvable ``t_<hex>`` refs (advisory event only).
     """
-    now = int(time.time())
-    # Cheap pre-check; re-checked inside the txn to close the parent-reopen race.
-    if not _parents_satisfied(conn, task_id):
-        return False
-    from hermes_cli.kanban_pr_acceptance_store import prepare_acceptance, record_acceptance
-    verified_cards = _gate_created_cards(conn, task_id, created_cards, summary or result)
-    metadata = _merge_completion_prose_artifacts(
-        conn, task_id, metadata, summary=summary, result=result,
-    )
-    handoff_summary = summary if summary is not None else result
-    acceptance = prepare_acceptance(conn, task_id, expected_run_id, metadata)
-    if acceptance is False:
+    from hermes_cli.kanban_db_completion import prepare, consume, postcommit
+    prepared = prepare(conn, task_id, result=result, summary=summary, metadata=metadata,
+                       created_cards=created_cards, expected_run_id=expected_run_id)
+    if prepared is False:
         return False
     with write_txn(conn):
-        # Hard invariant even for human review approval: a parent may have
-        # reopened while this task waited.
-        if not _parents_satisfied(conn, task_id):
+        outcome = consume(conn, task_id, prepared)
+        if outcome is False:
             return False
-        if acceptance is not None and not record_acceptance(conn, task_id, acceptance):
-            return False
-        prior_status = _task_status(conn, task_id)
-        sql = """
-                UPDATE tasks
-                   SET status       = 'done',
-                       result       = ?,
-                       completed_at = ?,
-                       claim_lock   = NULL,
-                       claim_expires= NULL,
-                       worker_pid   = NULL,
-                       block_kind   = NULL,
-                       block_recurrences = 0
-                 WHERE id = ?
-                   AND status IN ('running', 'ready', 'blocked', 'review')
-                """
-        params: tuple = (result, now, task_id)
-        if expected_run_id is not None:
-            sql += " AND current_run_id = ?"
-            params = (*params, int(expected_run_id))
-        if conn.execute(sql, params).rowcount != 1:
-            return False
-        if isinstance(metadata, dict):
-            _stage_completion_artifacts(conn, task_id, metadata, now)
-        run_id = _end_run(
-            conn, task_id, outcome="completed", status="done", summary=handoff_summary,
-            metadata=metadata,
-        )
-        # Never-claimed task: synthesize a run so the handoff fields survive.
-        if run_id is None and (summary or metadata or result or prior_status == "review"):
-            synth_summary, synth_metadata = handoff_summary, metadata
-            if prior_status == "review" and not synth_summary and not synth_metadata:
-                synth_summary = _REVIEW_APPROVED_NOTE
-                synth_metadata = {"source_status": "review", "approval": "manual"}
-            run_id = _synthesize_ended_run(
-                conn, task_id, outcome="completed", summary=synth_summary, metadata=synth_metadata,
-            )
-        event_summary = handoff_summary
-        if prior_status == "review" and not event_summary:
-            event_summary = _REVIEW_APPROVED_NOTE
-        _append_event(
-            conn, task_id, "completed",
-            _completed_event_payload(result, event_summary, verified_cards, metadata),
-            run_id=run_id,
-        )
-    _flag_phantom_prose_refs(conn, task_id, run_id, summary, result, verified_cards)
-    # Success wipes the breaker counter (history stays on the event log).
-    _clear_failure_counter(conn, task_id)
-    recompute_ready(conn)  # separate txn so children see ``done``
-    _cleanup_workspace(conn, task_id)
-    _done_task = get_task(conn, task_id)
-    if fire_lifecycle_hook:
-        _fire_task_hook("kanban_task_completed", _done_task, task_id, run_id, summary=handoff_summary)
-    return True
+    return postcommit(conn, task_id, prepared, outcome, fire_lifecycle_hook=fire_lifecycle_hook)
 
 
 _REVIEW_APPROVED_NOTE = "Review approved without additional evidence."
@@ -2941,14 +2898,17 @@ def block_task(
         raise ValueError(f"block kind must be one of {sorted(VALID_BLOCK_KINDS)} or None")
     with write_txn(conn):
         cur_row = conn.execute(
-            "SELECT status, block_kind, block_recurrences FROM tasks WHERE id = ?", (task_id,),
+            "SELECT * FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
-        if cur_row is None:
+        if (cur_row is None or cur_row["status"] not in ("running", "ready")
+                or (expected_run_id is not None and cur_row["current_run_id"] != int(expected_run_id))):
             return False
+        from hermes_cli.kanban_db_recovery import prepare_report, report_count, record_report
+        recovery, revision = prepare_report(conn, dict(cur_row), kind)
         source_status = _retry_status_for_run(conn, task_id) if cur_row["status"] == "running" else "ready"
         new_status, event_kind, set_sql, params, payload = _route_block(
             kind, reason, source_status, prev_kind=_row_get(cur_row, "block_kind"),
-            prev_recurrences=int(_row_get(cur_row, "block_recurrences") or 0),
+            prev_recurrences=report_count(recovery),
         )
         sql = f"""
                 UPDATE tasks
@@ -2969,7 +2929,14 @@ def block_task(
         run_id = _end_or_synthesize_run(
             conn, task_id, outcome="blocked", status="blocked", summary=reason, synthesize=bool(reason),
         )
-        _append_event(conn, task_id, event_kind, payload, run_id=run_id)
+        payload["blocker_id"] = recovery["active_blocker_id"]
+        payload["blocker_cycle"] = (recovery["blockers"][recovery["active_blocker_id"]]["cycle"]
+                                    if recovery["active_blocker_id"] else None)
+        if not recovery["reports"]:
+            # Bind inherited native budget even when this report is uncounted.
+            payload["blocker_seed"] = int(cur_row["block_recurrences"] or 0)
+        event_id = _append_event(conn, task_id, event_kind, payload, run_id=run_id)
+        record_report(conn, task_id, recovery, revision, event_id, kind)
         blocked_task = get_task(conn, task_id)
         if kind == "dependency":
             # Historical ordering: the dependency lane fires inside the txn.
@@ -2987,17 +2954,16 @@ def _route_block(
 
     ``dependency`` never enters the human ``blocked`` bucket: it waits in
     ``todo`` for ``recompute_ready``, so a cron never sees a dependency-wait
-    as something to "unblock". Every other kind counts unblock-loop
-    recurrences: block_task only fires from running/ready (AFTER an unblock
-    returned the task to the pool), so a stored ``block_kind`` equal to the
-    incoming one means blocked -> unblocked -> re-block for the same cause
-    (un-typed None compares equal to a prior un-typed block). At
+    as something to "unblock", and preserves the prior recurrence count.
+    Every other kind increments the preserved count: category/reason-only
+    reports are unclassified, so changed wording or category does not prove
+    resolution or a distinct blocker. At
     ``BLOCK_RECURRENCE_LIMIT`` the task routes to ``triage`` for a human.
     """
     payload = {"reason": reason, "kind": kind, "source_status": source_status}
     if kind == "dependency":
         return "todo", "dependency_wait", "block_kind    = ?", (kind,), payload
-    recurrences = prev_recurrences + 1 if prev_kind == kind else 1
+    recurrences = prev_recurrences + 1
     set_sql = "block_kind    = ?,\n                       block_recurrences = ?"
     payload = {"reason": reason, "kind": kind, "recurrences": recurrences, "source_status": source_status}
     if recurrences >= BLOCK_RECURRENCE_LIMIT:
@@ -3261,10 +3227,14 @@ def promote_task(
             f"`hermes kanban unlink <parent_id> {task_id}`)"
         )
 
+    if recovery_hold(conn, task_id):
+        return False, "unresolved blocker budget exhausted"
     if dry_run:
         return True, None
 
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False, "unresolved blocker budget exhausted"
         upd = conn.execute(
             "UPDATE tasks SET status = 'ready' "
             "WHERE id = ? AND status IN ('todo', 'blocked')", (task_id,),
@@ -3311,6 +3281,8 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     when that is where it left off), closing any leaked run first."""
     now = int(time.time())
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         resume_status = (
             _resume_status_from_events(conn, task_id)
             if _task_status(conn, task_id) == "blocked"
@@ -3357,6 +3329,8 @@ def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
     not a block; only :func:`complete_task` clears them)."""
     now = int(time.time())
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         _reclaim_dangling_run(
             conn, task_id, statuses=("review",), now=now,
             note="invariant recovery on review reopen",
@@ -3493,6 +3467,8 @@ def specify_triage_task(
         raise ValueError("title cannot be blank")
     assignee = _canonical_assignee(assignee)
     with write_txn(conn):
+        if recovery_hold(conn, task_id):
+            return False
         existing = conn.execute(
             "SELECT title, body, assignee FROM tasks WHERE id = ? AND status = 'triage'",
             (task_id,),
@@ -3588,7 +3564,7 @@ def archive_task(conn: sqlite3.Connection, task_id: str, *, signal_fn=None) -> b
 def _delete_task_relations(conn: sqlite3.Connection, task_id: str) -> None:
     """Delete every row referencing ``task_id`` (schema has no ON DELETE CASCADE)."""
     conn.execute("DELETE FROM task_links WHERE parent_id = ? OR child_id = ?", (task_id, task_id))
-    for table in ("task_comments", "task_events", "task_runs", "kanban_notify_subs"):
+    for table in ("task_comments", "task_events", "task_runs", "kanban_notify_subs", "task_recovery"):
         conn.execute(f"DELETE FROM {table} WHERE task_id = ?", (task_id,))
 
 
@@ -3941,7 +3917,8 @@ def gc_events(conn: sqlite3.Connection, *, older_than_seconds: int = 30 * 24 * 3
     cutoff = int(time.time()) - int(older_than_seconds)
     with write_txn(conn):
         cur = conn.execute(
-            "DELETE FROM task_events WHERE created_at < ? AND kind != 'decomposed' AND task_id IN "
+            "DELETE FROM task_events WHERE created_at < ? AND kind NOT IN ('decomposed', 'blocked', 'block_loop_detected', 'dependency_wait', 'blocker_classified', 'blocker_legacy_enrolled', 'blocker_cycle_closed', 'blocker_resolved', 'blocker_retried', 'spawned') "
+            "AND NOT (kind='completed' AND task_id IN (SELECT task_id FROM task_recovery)) AND task_id IN "
             "(SELECT id FROM tasks WHERE status IN ('done', 'archived'))", (cutoff,),
         )
     return int(cur.rowcount or 0)
