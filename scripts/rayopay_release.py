@@ -127,9 +127,9 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
     # A common-directory lock serializes this wrapper's metadata operations.
     # Git's own locks still protect against independent Git callers.
     lock_path = Path(source["common_dir"]) / "rayopay-release.lock"
-    with lock_path.open("a", encoding="utf-8") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
+    try:
+        with lock_path.open("a", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             git(repo, "fetch", "--no-tags", upstream_source, upstream_sha)
             # An installed fork merge need not belong to official upstream.
             # Validate its retention against the combined candidate below.
@@ -148,11 +148,11 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
                 assert_ancestor(candidate, downstream_sha, combined["head"])
                 receipt.update(status="prepared-not-qualified", combined=combined,
                                changed_from_installed=git(candidate, "diff", "--name-only", deployed["head"], combined["head"]).splitlines())
-        except Exception as exc:
-            receipt.update(status="blocked", reason=type(exc).__name__)
             atomic_json(operation / "release.json", receipt)
-            raise
+    except Exception as exc:
+        receipt.update(status="blocked", reason=type(exc).__name__)
         atomic_json(operation / "release.json", receipt)
+        raise
     return receipt
 
 
@@ -160,6 +160,8 @@ def load_release(operation: Path) -> dict:
     operation = exact_path(operation)
     path = exact_path(operation / "release.json")
     result = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(result, dict):
+        raise Refusal("Malformed release evidence")
     if result.get("schema") != 1 or result.get("status") != "prepared-not-qualified":
         raise Refusal("A successfully prepared candidate is required")
     candidate = exact_path(result["candidate"])
@@ -310,6 +312,8 @@ def main() -> int:
             result = verify(args.operation, args.expected_sha, args.expected_origin, args.expected_branch)
         else:
             result = json.loads(exact_path(args.operation / "release.json").read_text(encoding="utf-8"))
+            if not isinstance(result, dict):
+                raise Refusal("Malformed release evidence")
         print(json.dumps(result, indent=2))
         return 2 if result.get("status") == "blocked" else 0
     except (Refusal, OSError, ValueError, subprocess.TimeoutExpired) as exc:

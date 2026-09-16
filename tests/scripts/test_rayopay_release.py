@@ -282,3 +282,50 @@ def test_next_fork_release_checks_combined_ancestry(trees, tmp_path, preserve_in
             release.prepare(source, installed, op, upstream, downstream, str(official))
         assert json.loads((op / "release.json").read_text())["status"] == "blocked"
     assert file_snapshot(installed) == before
+
+
+@pytest.mark.parametrize("command", ["bundle", "status"])
+@pytest.mark.parametrize("value", [[], None, "not-an-object"])
+def test_cli_refuses_non_object_receipts(tmp_path, command, value):
+    op = tmp_path / "operation"
+    op.mkdir()
+    (op / "release.json").write_text(json.dumps(value), encoding="utf-8")
+    before = file_snapshot(op)
+    result = subprocess.run(
+        [sys.executable, str(release.__file__), command, "--operation", str(op)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["status"] == "refused"
+    assert "Traceback" not in result.stderr
+    assert file_snapshot(op) == before
+
+
+@pytest.mark.parametrize("lock_failure", ["contended", "directory"])
+def test_prepare_records_lock_failure_as_blocked(trees, tmp_path, lock_failure):
+    import fcntl
+    from contextlib import ExitStack
+    source, installed, upstream, downstream = trees
+    lock_path = source / ".git" / "rayopay-release.lock"
+    op = tmp_path / "blocked-operation"
+    with ExitStack() as stack:
+        if lock_failure == "contended":
+            lock = stack.enter_context(lock_path.open("a", encoding="utf-8"))
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            lock_path.mkdir()
+        before = file_snapshot(installed)
+        result = subprocess.run(
+            [sys.executable, str(release.__file__), "prepare",
+             "--repo", str(source), "--installed", str(installed), "--operation", str(op),
+             "--upstream-sha", upstream, "--downstream-sha", downstream,
+             "--upstream-source", str(installed)],
+            text=True, encoding="utf-8", capture_output=True, check=False,
+        )
+        assert result.returncode == 2
+        assert json.loads(result.stdout)["status"] == "refused"
+        receipt = json.loads((op / "release.json").read_text(encoding="utf-8"))
+        assert receipt["status"] == "blocked"
+        assert receipt["reason"] == ("BlockingIOError" if lock_failure == "contended" else "IsADirectoryError")
+        assert not (op / "candidate").exists()
+        assert file_snapshot(installed) == before
