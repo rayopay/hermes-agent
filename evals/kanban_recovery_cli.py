@@ -44,7 +44,7 @@ def check_repo(head):
     common = (REPO / git("rev-parse", "--git-common-dir")).resolve()
     assert common == EXPECTED_COMMON, "unexpected repository"
     assert not (REPO / ".env").exists(), "candidate dotenv would defeat credential isolation"
-    assert tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["scripts"]["hermes"] == "hermes_cli.main:main"
+    assert tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["scripts"]["hermes"] == "hermes_cli.main:main"
     assert PYTHON.is_file(), "candidate venv missing; no fallback"
     assert Path(sys.prefix).resolve() == (REPO / ".venv").resolve(), "candidate interpreter required"
 

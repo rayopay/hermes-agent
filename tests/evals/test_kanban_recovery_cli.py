@@ -8,6 +8,8 @@ import tempfile
 
 import pytest
 
+pytestmark = pytest.mark.linux_only
+
 REPO = Path(__file__).resolve().parents[2]
 
 
