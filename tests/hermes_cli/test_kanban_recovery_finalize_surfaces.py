@@ -147,6 +147,7 @@ def test_native_refusals_preserve_full_board(board, capsys, transport, monkeypat
     if fault in {"missing", "stale", "failure", "head"}:
         assert transport["calls"] and result["reason"] == "current PR acceptance not established"
     if fault == "contract_race":
+        assert transport["race_calls"] == 1
         assert transport["calls"] and result["reason"] == "stale report or observation"
     if fault == "instruction":
         assert result["reason"] == "invalid finalization request"

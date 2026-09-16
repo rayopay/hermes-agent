@@ -12,29 +12,33 @@ from tests.hermes_cli.test_kanban_recovery_release import board, block, request
 @pytest.fixture
 def transport(monkeypatch):
     from hermes_cli import kanban_pr_acceptance as acceptance
-    state = {"calls": [], "fault": None}
+    state = {"calls": [], "fault": None, "pr_reads": 0, "race_calls": 0}
     sha = "a" * 40
     def api(endpoint, **kwargs):
         state["calls"].append(endpoint)
         fault = state["fault"]
-        if endpoint == "graphql":
-            return {"data": {"repository": {"pullRequest": {
-                "headRefOid": sha, "baseRefName": "main", "state": "OPEN",
-                "baseRef": {"branchProtectionRule": {"requiredStatusChecks": [
-                    {"context": "required", "app": {"databaseId": 1}}]}}}}}}
-        if "/rules/" in endpoint:
-            return [[]]
-        if "/check-runs" in endpoint:
+        if endpoint == "repos/acme/repo/pulls/7":
+            assert not kwargs.get("paginate")
+            state["pr_reads"] += 1
+            final = state["pr_reads"] == 2
+            return {"head": {"sha": "b" * 40 if final and fault == "head" else sha},
+                    "base": {"ref": "release" if final and fault == "base" else "main"},
+                    "state": "open", "merged": False}
+        if endpoint == f"repos/acme/repo/commits/{sha}/check-runs?per_page=100&filter=latest":
+            assert kwargs == {"paginate": True}
             if state.get("race"):
+                state["race_calls"] += 1
                 state["race"]()
             runs = [] if fault == "missing" else [{"id": 1, "name": "required",
                 "head_sha": "b" * 40 if fault == "stale" else sha, "app": {"id": 1},
-                "status": "completed", "conclusion": "failure" if fault == "failure" else "success"}]
+                "check_suite": {"id": 10}, "status": "completed",
+                "conclusion": "failure" if fault == "failure" else "success"}]
+            runs = state.get("runs", runs)
             return [{"total_count": len(runs), "check_runs": runs}]
-        if "/statuses" in endpoint:
+        if endpoint == f"repos/acme/repo/commits/{sha}/statuses?per_page=100":
+            assert kwargs == {"paginate": True}
             return [[]]
-        return {"head": {"sha": "b" * 40 if fault == "head" else sha},
-                "base": {"ref": "main"}, "state": "open"}
+        pytest.fail(f"Unexpected transport or paid-policy request: {endpoint}")
     monkeypatch.setattr(acceptance, "_api", api)
     return state
 
@@ -120,10 +124,82 @@ def test_denial_and_sql_fault_preserve_full_state(board, transport, monkeypatch,
         with delegated_child_context("child"):
             with pytest.raises(PermissionError): finalize_task(board, tid, **args)
     elif fault.endswith("_fault"):
-        with pytest.raises(sqlite3.IntegrityError): finalize_task(board, tid, **args)
+        with pytest.raises(sqlite3.IntegrityError, match="rollback proof"): finalize_task(board, tid, **args)
     else:
         assert not finalize_task(board, tid, **args)["ok"]
     assert list(board.iterdump()) == baseline[0]
     assert not hooks
+    if fault in {"contract_race", "parent_race", "token_race"}:
+        assert transport["race_calls"] == 1
+    if fault.endswith("_fault") or fault in {"missing", "failure", "head"}:
+        assert transport["pr_reads"] == 2
+    if fault == "stale":
+        assert any("/statuses" in call for call in transport["calls"])
     if fault in {"worker", "delegate", "pid", "token", "parent", "local-only", "absent", "repo"}:
         assert not transport["calls"]
+
+
+@pytest.mark.linux_only
+@pytest.mark.parametrize("case,accepted", [
+    ("optional_failure", False), ("skipped", True), ("neutral", True),
+    ("zero", False), ("all_skipped", False), ("all_neutral", False),
+    ("bad_check", False), ("bad_suite", False), ("head", False), ("base", False),
+])
+def test_reported_ci_composes_with_native_finalization(board, transport, monkeypatch, case, accepted):
+    from hermes_cli.kanban_db_recovery_finalize import finalize_task
+    tid, _ = held(board)
+    parent = kb.create_task(board, title="accepted prerequisite", assignee="worker", completion_contract="local-only")
+    assert kb.complete_task(board, parent)
+    kb.link_tasks(board, parent, tid)
+    args = request(board, tid); args.pop("action")
+    old_task = kb.get_task(board, tid)
+    old_runs = kb.list_runs(board, tid)
+    old_events = kb.list_events(board, tid)
+    old_deps = [tuple(r) for r in board.execute("SELECT * FROM task_links")]
+    original = {"id": 1, "name": "build", "app": {"id": 1}, "check_suite": {"id": 10},
+                "head_sha": "a" * 40, "status": "completed", "conclusion": "success"}
+    runs = [original]
+    if case in {"optional_failure", "skipped", "neutral"}:
+        runs.append({**original, "id": 2, "name": "optional", "check_suite": {"id": 20},
+                     "conclusion": "failure" if case == "optional_failure" else case})
+    elif case == "zero":
+        runs = []
+    elif case in {"all_skipped", "all_neutral"}:
+        runs = [{**original, "conclusion": case.removeprefix("all_")}]
+    elif case == "bad_check":
+        runs = [{**original, "id": True}]
+    elif case == "bad_suite":
+        runs = [{**original, "check_suite": {"id": 0}}]
+    transport.update(runs=runs, fault=case)
+    monkeypatch.setattr(kb, "claim_task", lambda *a, **k: pytest.fail("worker replay"))
+    board.execute("CREATE TRIGGER no_ready BEFORE UPDATE OF status ON tasks WHEN NEW.id='" + tid + "' AND NEW.status NOT IN ('triage','done') BEGIN SELECT RAISE(ABORT,'status cycling'); END")
+    before = list(board.iterdump())
+    result = finalize_task(board, tid, **args)
+    assert result["ok"] is accepted
+    prefix = ["repos/acme/repo/pulls/7",
+              "repos/acme/repo/commits/" + "a" * 40 + "/check-runs?per_page=100&filter=latest",
+              "repos/acme/repo/commits/" + "a" * 40 + "/statuses?per_page=100"]
+    assert transport["calls"] == prefix + ([] if case in {"bad_check", "bad_suite"} else [prefix[0]])
+    assert kb.list_runs(board, tid) == old_runs
+    assert [tuple(r) for r in board.execute("SELECT * FROM task_links")] == old_deps
+    if not accepted:
+        assert list(board.iterdump()) == before
+        assert result["reason"] == "current PR acceptance not established"
+        return
+    task = kb.get_task(board, tid)
+    assert task.status == "done" and task.current_run_id is None
+    assert task.assignee == old_task.assignee and task.completion_contract == old_task.completion_contract
+    events = kb.list_events(board, tid)
+    assert events[:len(old_events)] == old_events
+    kinds = [e.kind for e in events]
+    assert kinds.count("completed") == kinds.count("blocker_cycle_closed") == kinds.count("triage_finalized") == 1
+    receipts = [e.payload for e in events if e.kind == "pr_acceptance"]
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt["ok"] and receipt["acceptance_basis"] == "reported-ci"
+    assert (receipt["head_sha"], receipt["base_ref"], receipt["pr_url"]) == ("a" * 40, "main", old_task.completion_contract)
+    assert {c["classification"] for c in receipt["checks"]} == {"success", "non_blocking"}
+    assert recovery.get_recovery_state(board, tid)["closed_cycles"]
+    after = list(board.iterdump()); calls = list(transport["calls"])
+    assert not finalize_task(board, tid, **args)["ok"]
+    assert list(board.iterdump()) == after and transport["calls"] == calls
