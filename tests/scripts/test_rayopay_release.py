@@ -405,3 +405,79 @@ def test_bundle_cli_refuses_incomplete_candidate_evidence(trees, tmp_path, field
     assert json.loads(result.stdout)["status"] == "refused"
     assert "Traceback" not in result.stderr
     assert not (op / "release.bundle").exists()
+
+
+@pytest.mark.parametrize("schema", [True, 1.0, 1], ids=["boolean", "float", "integer"])
+@pytest.mark.parametrize("consumer", ["status", "bundle", "verify_release", "verify_bundle"])
+def test_cli_requires_integer_schema_at_every_receipt_consumer(trees, tmp_path, schema, consumer):
+    """Equal numeric values are not interchangeable JSON schema types."""
+    _, installed, _, _ = trees
+    git(installed, "remote", "add", "origin", release.UPSTREAM)
+    op = tmp_path / "operation"
+    receipt = prepare(trees, op)
+    args = [sys.executable, "-B", str(release.__file__), consumer.split("_")[0],
+            "--operation", str(op)]
+    path = op / "release.json"
+    if consumer.startswith("verify_"):
+        transport = release.bundle(op)
+        args += ["--expected-sha", transport["sha"], "--expected-origin", release.UPSTREAM,
+                 "--expected-branch", "main"]
+        if consumer == "verify_bundle":
+            path, receipt = op / "bundle.json", transport
+    receipt["schema"] = schema
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    before = file_snapshot(tmp_path)
+    result = subprocess.run(args, text=True, encoding="utf-8", capture_output=True, check=False)
+    report = json.loads(result.stdout)
+    if type(schema) is int:
+        assert result.returncode == 0, result.stdout + result.stderr
+        if consumer.startswith("verify_"):
+            assert report["status"] == "snapshot-verified-not-deployable"
+            assert report["deployment"] == "not authorized"
+        elif consumer == "status":
+            assert report == receipt
+        else:
+            assert (op / "release.bundle").is_file()
+            assert report["qualification"] == "not established by bundle creation"
+        if consumer != "bundle":
+            assert file_snapshot(tmp_path) == before
+    else:
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert report == {"status": "refused", "reason": (
+            "Malformed bundle manifest" if consumer == "verify_bundle" else "Malformed release evidence")}
+        assert file_snapshot(tmp_path) == before
+        if consumer == "bundle":
+            assert not (op / "release.bundle").exists()
+    assert not result.stderr
+
+
+def test_prepare_cli_retains_specific_safe_refusal_for_status(trees, tmp_path):
+    """A real ancestry refusal remains diagnosable after the CLI exits."""
+    source, installed, downstream, upstream = trees
+    official = tmp_path / "official"
+    subprocess.run(["git", "clone", "-q", str(installed), str(official)], check=True)
+    commit(installed, "installed-only.txt", "must not disappear\n")
+    before = file_snapshot(installed)
+    op = tmp_path / "blocked-operation"
+    result = subprocess.run(
+        [sys.executable, "-B", str(release.__file__), "prepare", "--repo", str(source),
+         "--installed", str(installed), "--operation", str(op), "--upstream-sha", upstream,
+         "--downstream-sha", downstream, "--upstream-source", str(official)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    expected = "Candidate would omit the installed revision or ancestry is unavailable"
+    assert result.returncode == 2
+    assert json.loads(result.stdout) == {"status": "refused", "reason": expected}
+    receipt = json.loads((op / "release.json").read_text(encoding="utf-8"))
+    status = subprocess.run(
+        [sys.executable, "-B", str(release.__file__), "status", "--operation", str(op)],
+        text=True, encoding="utf-8", capture_output=True, check=False,
+    )
+    assert status.returncode == 2
+    assert json.loads(status.stdout) == receipt
+    assert receipt["status"] == "blocked"
+    assert receipt["reason"] == expected
+    assert (op / "candidate").is_dir()
+    assert not (op / "release.bundle").exists()
+    assert file_snapshot(installed) == before
+    assert not result.stderr and not status.stderr

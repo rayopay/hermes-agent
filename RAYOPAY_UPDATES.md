@@ -80,6 +80,10 @@ It reads Git objects/config/refs and artifacts; it does not fetch, update indexe
 repair metadata, approve tests, inspect fleet activity or hold any deployment lock.
 Exit 0 reports **`snapshot-verified-not-deployable`** with explicit remaining gates.
 Input drift, malformed evidence and inherited Git override variables are refusals.
+All receipt consumers require schema version 1 as a JSON integer, not Boolean true
+or floating-point 1.0. Blocked preparation receipts retain the helper's specific
+safe prerequisite reason; unexpected exceptions retain only their class name,
+never arbitrary remote or operating-system diagnostics.
 Receipt JSON is local evidence, not signed authorization. A snapshot can become
 stale immediately; repeat checks under maintenance ownership before mutation.
 

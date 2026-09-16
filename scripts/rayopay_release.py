@@ -152,7 +152,8 @@ def prepare(repo: Path, installed: Path, operation: Path, upstream_sha: str,
                                changed_from_installed=git(candidate, "diff", "--name-only", deployed["head"], combined["head"]).splitlines())
             atomic_json(operation / "release.json", receipt)
     except Exception as exc:
-        receipt.update(status="blocked", reason=type(exc).__name__)
+        reason = str(exc) if isinstance(exc, Refusal) else type(exc).__name__
+        receipt.update(status="blocked", reason=reason)
         atomic_json(operation / "release.json", receipt)
         raise
     return receipt
@@ -162,9 +163,10 @@ def load_release(operation: Path) -> dict:
     operation = exact_path(operation)
     path = exact_path(operation / "release.json")
     result = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(result, dict):
+    if (not isinstance(result, dict) or type(result.get("schema")) is not int
+            or result.get("schema") != 1):
         raise Refusal("Malformed release evidence")
-    if result.get("schema") != 1 or result.get("status") != "prepared-not-qualified":
+    if result.get("status") != "prepared-not-qualified":
         raise Refusal("A successfully prepared candidate is required")
     if not isinstance(result.get("candidate"), str) or not isinstance(result.get("combined"), dict):
         raise Refusal("Malformed release evidence")
@@ -234,12 +236,13 @@ def verify(operation: Path, expected_sha: str, expected_origin: str, expected_br
     try:
         release = load_release(operation)
         transport = json.loads(exact_path(operation / "bundle.json").read_text(encoding="utf-8"))
-        if not isinstance(transport, dict):
+        if (not isinstance(transport, dict) or type(transport.get("schema")) is not int
+                or transport.get("schema") != 1):
             raise Refusal("Malformed bundle manifest")
         branch = "rayopay-release/" + expected_sha
         target = exact_path(release["installed"]["path"])
         bundle_path = exact_path(transport["bundle"])
-        if (transport["schema"] != 1 or transport["sha"] != expected_sha
+        if (transport["sha"] != expected_sha
                 or release["combined"]["head"] != expected_sha
                 or transport["branch"] != branch
                 or transport["prerequisite"] != release["installed"]["head"]
